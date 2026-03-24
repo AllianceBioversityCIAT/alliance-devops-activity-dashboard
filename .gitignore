@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+.next/
+coverage/
+.env
+.env.local
+.env.development
+.env.production
+apps/frontend/.env
+apps/frontend/.env.local
+apps/backend/.env
+apps/backend/.env.local
+samconfig.toml
+.aws-sam/
+.DS_Store

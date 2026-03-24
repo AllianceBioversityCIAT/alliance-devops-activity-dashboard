@@ -1,0 +1,68 @@
+---
+description: Rules for the DevOps Activity Dashboard MVP
+alwaysApply: true
+---
+
+# DevOps Activity Dashboard Rules
+
+## Spec-Driven Development
+- Always read all files under `docs/spec/` before proposing or generating implementation.
+- Treat the spec as the source of truth.
+- Do not implement features outside the documented MVP scope unless the spec is updated first.
+- Before coding, summarize the relevant spec section being implemented.
+
+## Implementation Approach
+- Work incrementally, one phase at a time, following `docs/spec/07-implementation-plan.md`.
+- Do not generate the entire system at once.
+- Prefer small, verifiable changes over large rewrites.
+- Keep the project runnable locally at every phase.
+
+## Architecture
+- Follow a modular architecture inspired by hexagonal principles for both frontend and backend.
+- Backend must separate:
+  - domain
+  - application
+  - infrastructure
+  - interfaces
+- Frontend must separate:
+  - domain
+  - application
+  - infrastructure
+  - ui
+- Do not place business logic directly inside controllers, routes, pages, or UI components.
+
+## Technology Constraints
+- Use TypeScript in frontend and backend.
+- Enable strict typing.
+- Avoid `any` unless strictly necessary and justified.
+- Use environment variables for all environment-specific configuration.
+- Never hardcode secrets, AWS identifiers, URLs, or credentials.
+
+## Quality
+- Use ESLint and Prettier.
+- Keep files small and maintainable.
+- Use clear naming and consistent folder structure.
+- Add minimal but meaningful comments only when useful.
+- After implementing changes, run lint and tests when available.
+
+## Authentication
+- Authentication must use Amazon Cognito.
+- Login flow must be email + password.
+- Backend must validate JWTs for protected endpoints.
+- Do not invent alternative auth mechanisms unless explicitly requested.
+
+## Data
+- DynamoDB is the initial read-only source of truth for deployment data.
+- Use the contracts defined in `docs/spec/05-data-model.md`.
+- Map DynamoDB records into clean domain models before returning API responses.
+
+## Infrastructure
+- Deployment must target AWS serverless services.
+- Infrastructure must be managed as code under `infra/`.
+- Prefer AWS SAM / CloudFormation for MVP deployment resources.
+- Existing shared resources such as Cognito and DynamoDB may be referenced through configuration rather than created.
+
+## Documentation
+- When completing a phase, update relevant docs if assumptions or implementation details changed.
+- If implementation deviates from the spec, explicitly explain why before making the change.
+

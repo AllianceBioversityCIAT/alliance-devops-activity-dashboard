@@ -1,0 +1,28 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "devops-activity-dashboard-prod"
+resolve_s3 = true
+s3_prefix = "devops-activity-dashboard-prod"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+image_repositories = []
+parameter_overrides = [
+  "EnvironmentName=prod",
+  "AwsRegion=us-east-1",
+  "BackendFunctionName=devops-activity-dashboard-backend",
+  "FrontendBucketName=REPLACE_WITH_UNIQUE_PROD_BUCKET",
+  "DynamoDbTableName=jenkinsexecutions_test",
+  "CognitoUserPoolId=REPLACE_ME",
+  "CognitoAppClientId=REPLACE_ME",
+  "CognitoClientSecret=REPLACE_ME",
+  "CognitoIssuer=REPLACE_ME",
+  "CognitoDomain=REPLACE_ME",
+  "FrontendRedirectUri=REPLACE_WITH_PROD_REDIRECT_URI",
+  "CognitoIdentityProvider=AzureAD",
+  "LogLevel=info",
+  "AwsAccessKeyId=REPLACE_ME",
+  "AwsSecretAccessKey=REPLACE_ME",
+  "CloudFrontPriceClass=PriceClass_100"
+]
