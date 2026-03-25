@@ -5,12 +5,16 @@ import type { ExecutiveSummaryDeployment } from "@domain/ExecutiveSummaryDeploym
 import { fetchExecutiveSummaryDeployments } from "@infrastructure/api/executiveSummaryApi";
 import { isAuthenticated, signOut } from "../src/infrastructure/auth/CognitoClient";
 import {
+  applyExecutiveSummaryFilters,
+  applicationNameOptionsFromDataset,
   computeSummaryKpis,
+  environmentOptionsFromDataset,
   failureTrend,
   groupByApplication,
   groupByProject,
   mostActiveApplication,
   mostActiveProject,
+  projectOptionsFromDataset,
   repeatedFailures,
   topFailingApplications
 } from "@application/executiveSummary";
@@ -38,12 +42,15 @@ export default function SummaryPage() {
   const [checked, setChecked] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<ExecutiveSummaryDeployment[]>([]);
+  /** Full dataset for the selected date range and status (all pages merged). */
+  const [datasetItems, setDatasetItems] = useState<ExecutiveSummaryDeployment[]>([]);
 
   const [fromDate, setFromDate] = useState(() => firstDayOfCurrentMonthYyyyMmDd());
   const [toDate, setToDate] = useState(() => todayYyyyMmDd());
-  const [application, setApplication] = useState("");
   const [status, setStatus] = useState<StatusFilter>("");
+  const [filterProject, setFilterProject] = useState("");
+  const [filterEnvironment, setFilterEnvironment] = useState("");
+  const [filterApplicationName, setFilterApplicationName] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -72,7 +79,6 @@ export default function SummaryPage() {
             {
               from: fromDate ? `${fromDate}T00:00:00.000Z` : undefined,
               to: toDate ? `${toDate}T23:59:59.999Z` : undefined,
-              application: application || undefined,
               status: status || undefined
             },
             page,
@@ -98,11 +104,11 @@ export default function SummaryPage() {
           if (page > 25) break; // MVP safety cap
         }
         if (cancelled) return;
-        setItems(all);
+        setDatasetItems(all);
       } catch {
         if (!cancelled) {
           setError("Unable to load executive summary data. Please try again.");
-          setItems([]);
+          setDatasetItems([]);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -112,21 +118,58 @@ export default function SummaryPage() {
     return () => {
       cancelled = true;
     };
-  }, [checked, fromDate, toDate, application, status]);
+  }, [checked, fromDate, toDate, status]);
 
-  const kpis = useMemo(() => computeSummaryKpis(items), [items]);
-  const byApp = useMemo(() => groupByApplication(items), [items]);
-  const byProject = useMemo(() => groupByProject(items), [items]);
-  const topFailing = useMemo(() => topFailingApplications(items), [items]);
-  const repeated = useMemo(() => repeatedFailures(items), [items]);
-  const mostActive = useMemo(() => mostActiveApplication(items), [items]);
-  const mostActiveProj = useMemo(() => mostActiveProject(items), [items]);
-  const trend = useMemo(() => failureTrend(items), [items]);
+  useEffect(() => {
+    const projects = projectOptionsFromDataset(datasetItems);
+    if (filterProject && !projects.includes(filterProject)) {
+      setFilterProject("");
+      return;
+    }
+    const envs = environmentOptionsFromDataset(datasetItems, filterProject);
+    if (filterEnvironment && !envs.includes(filterEnvironment)) {
+      setFilterEnvironment("");
+      return;
+    }
+    const apps = applicationNameOptionsFromDataset(datasetItems, filterProject, filterEnvironment);
+    if (filterApplicationName && !apps.includes(filterApplicationName)) {
+      setFilterApplicationName("");
+    }
+  }, [datasetItems, filterProject, filterEnvironment, filterApplicationName]);
+
+  const projectOptions = useMemo(() => projectOptionsFromDataset(datasetItems), [datasetItems]);
+  const environmentOptions = useMemo(
+    () => environmentOptionsFromDataset(datasetItems, filterProject),
+    [datasetItems, filterProject]
+  );
+  const applicationNameOptions = useMemo(
+    () => applicationNameOptionsFromDataset(datasetItems, filterProject, filterEnvironment),
+    [datasetItems, filterProject, filterEnvironment]
+  );
+
+  const filteredItems = useMemo(
+    () =>
+      applyExecutiveSummaryFilters(datasetItems, {
+        project: filterProject,
+        environment: filterEnvironment,
+        applicationName: filterApplicationName
+      }),
+    [datasetItems, filterProject, filterEnvironment, filterApplicationName]
+  );
+
+  const kpis = useMemo(() => computeSummaryKpis(filteredItems), [filteredItems]);
+  const byApp = useMemo(() => groupByApplication(filteredItems), [filteredItems]);
+  const byProject = useMemo(() => groupByProject(filteredItems), [filteredItems]);
+  const topFailing = useMemo(() => topFailingApplications(filteredItems), [filteredItems]);
+  const repeated = useMemo(() => repeatedFailures(filteredItems), [filteredItems]);
+  const mostActive = useMemo(() => mostActiveApplication(filteredItems), [filteredItems]);
+  const mostActiveProj = useMemo(() => mostActiveProject(filteredItems), [filteredItems]);
+  const trend = useMemo(() => failureTrend(filteredItems), [filteredItems]);
 
   useEffect(() => {
     if (loading) return;
-    logExecutiveSummaryUiFinalDataset(items);
-  }, [items, loading]);
+    logExecutiveSummaryUiFinalDataset(filteredItems);
+  }, [filteredItems, loading]);
 
   if (!checked) return null;
 
@@ -160,6 +203,7 @@ export default function SummaryPage() {
 
         <section className="panel block">
           <h2 className="block-title">Filters</h2>
+          <p className="filter-hint">Date and status apply to the loaded dataset. Project, environment, and application narrow the view using enriched names (not Jenkins job names).</p>
           <div className="filters">
             <label className="field">
               <span>From date</span>
@@ -170,10 +214,6 @@ export default function SummaryPage() {
               <input className="input" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
             </label>
             <label className="field">
-              <span>Application / Job</span>
-              <input className="input" value={application} onChange={(e) => setApplication(e.target.value)} placeholder="e.g. payments-service" />
-            </label>
-            <label className="field">
               <span>Status</span>
               <select className="select" value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
                 <option value="">All</option>
@@ -181,12 +221,65 @@ export default function SummaryPage() {
                 <option value="failure">Failure</option>
               </select>
             </label>
+            <label className="field">
+              <span>Project</span>
+              <select
+                className="select"
+                value={filterProject}
+                onChange={(e) => {
+                  setFilterProject(e.target.value);
+                  setFilterEnvironment("");
+                  setFilterApplicationName("");
+                }}
+              >
+                <option value="">All projects</option>
+                {projectOptions.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Environment</span>
+              <select
+                className="select"
+                value={filterEnvironment}
+                onChange={(e) => {
+                  setFilterEnvironment(e.target.value);
+                  setFilterApplicationName("");
+                }}
+              >
+                <option value="">All environments</option>
+                {environmentOptions.map((env) => (
+                  <option key={env} value={env}>
+                    {env}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Application</span>
+              <select className="select" value={filterApplicationName} onChange={(e) => setFilterApplicationName(e.target.value)}>
+                <option value="">All applications</option>
+                {applicationNameOptions.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </section>
 
         {loading ? <p className="state state-loading">Loading summary…</p> : null}
         {error ? <p className="state state-error">{error}</p> : null}
-        {!loading && !error && items.length === 0 ? <p className="state state-empty">No deployment data available for the selected filters.</p> : null}
+        {!loading && !error && datasetItems.length === 0 ? (
+          <p className="state state-empty">No deployment data available for the selected date range and status.</p>
+        ) : null}
+        {!loading && !error && datasetItems.length > 0 && filteredItems.length === 0 ? (
+          <p className="state state-empty">No rows match the selected project, environment, and application filters.</p>
+        ) : null}
 
         <section className="metrics">
           <div className="panel metric"><div className="metric-label">Total deployments</div><div className="metric-value">{kpis.totalDeployments}</div></div>
@@ -198,7 +291,7 @@ export default function SummaryPage() {
         <section className="panel block">
           <h2 className="block-title">Attention Required</h2>
           <div className="rows">
-            <div className="row-title">Top failing applications (Top 3)</div>
+            <div className="row-title">Top failing applications (app + environment, Top 3)</div>
             {topFailing.length === 0 ? <div className="row muted">No failing applications in current filter scope.</div> : topFailing.map((x) => (
               <div key={x.application} className="row"><span>{x.application}</span><strong>{x.failures} failures</strong></div>
             ))}
@@ -211,6 +304,7 @@ export default function SummaryPage() {
 
         <section className="panel block">
           <h2 className="block-title">Breakdown by Application</h2>
+          <p className="section-hint">Each row is application and environment (e.g. Reporting Tool — prod).</p>
           <div className="rows">
             {byApp.map((x) => (
               <div key={x.application} className="row"><span>{x.application}</span><span>Total: {x.total} | Failures: {x.failures}</span></div>
@@ -254,7 +348,9 @@ export default function SummaryPage() {
         .panel { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; }
         .block { padding: 16px; margin-bottom: 24px; }
         .block-title { margin: 0 0 14px; font-size: 16px; color: #101828; }
-        .filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; width: 100%; }
+        .filter-hint { margin: 0 0 14px; font-size: 13px; color: #667085; line-height: 1.45; }
+        .section-hint { margin: -8px 0 12px; font-size: 13px; color: #667085; }
+        .filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; width: 100%; }
         .field { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: #475467; min-width: 0; }
         .input, .select { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid #d0d5dd; border-radius: 10px; padding: 9px 10px; font-size: 14px; background: #fff; }
         .btn {

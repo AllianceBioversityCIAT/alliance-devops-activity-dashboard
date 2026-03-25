@@ -16,8 +16,8 @@ function isDebugEnabled(): boolean {
 }
 
 /**
- * Stage C: logs the same merged `items[]` array that drives Executive Summary UI
- * (after all API pages are concatenated). Enable with NEXT_PUBLIC_EXEC_SUMMARY_DEBUG=true.
+ * Stage C: logs the dataset that drives visible metrics (typically after client-side filters).
+ * Enable with NEXT_PUBLIC_EXEC_SUMMARY_DEBUG=true.
  */
 export function logExecutiveSummaryUiFinalDataset(items: ExecutiveSummaryDeployment[]): void {
   if (!isDebugEnabled()) return;
@@ -32,7 +32,7 @@ export function logExecutiveSummaryUiFinalDataset(items: ExecutiveSummaryDeploym
   const topFail = topFailingApplications(items);
 
   console.debug("[executive_summary:C_ui_final_dataset]", {
-    note: "Merged across all pages in summary.tsx — this is what the UI renders.",
+    note: "Same rows used for KPIs and tables (after date/status fetch and optional project/env/app filters).",
     totalRows: items.length,
     uniqueJobNamesCount: uniqueJobs.length,
     sampleUniqueJobNames: uniqueJobs.slice(0, 40),

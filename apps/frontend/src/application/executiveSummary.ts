@@ -7,6 +7,15 @@ export type SummaryKpis = {
   successRate: number;
 };
 
+/** Display between application name and environment in labels (e.g. Reporting Tool — dev). */
+export const APPLICATION_ENV_SEPARATOR = " — ";
+
+export function formatApplicationEnvironmentLabel(item: ExecutiveSummaryDeployment): string {
+  const name = item.applicationName?.trim() || "unknown";
+  const env = item.environment?.trim() || "UNKNOWN";
+  return `${name}${APPLICATION_ENV_SEPARATOR}${env}`;
+}
+
 export function computeSummaryKpis(items: ExecutiveSummaryDeployment[]): SummaryKpis {
   const totalDeployments = items.length;
   const successCount = items.filter((x) => x.status === "success").length;
@@ -15,11 +24,11 @@ export function computeSummaryKpis(items: ExecutiveSummaryDeployment[]): Summary
   return { totalDeployments, successCount, failureCount, successRate };
 }
 
-/** Groups by enriched application name. */
+/** Groups by enriched application name + environment (distinct rows per app/env). */
 export function groupByApplication(items: ExecutiveSummaryDeployment[]): Array<{ application: string; total: number; failures: number }> {
   const map = new Map<string, { total: number; failures: number }>();
   for (const item of items) {
-    const key = item.applicationName || "unknown";
+    const key = formatApplicationEnvironmentLabel(item);
     const row = map.get(key) ?? { total: 0, failures: 0 };
     row.total += 1;
     if (item.status === "failure") row.failures += 1;
@@ -96,4 +105,48 @@ export function failureTrend(items: ExecutiveSummaryDeployment[]): "increase" | 
   if (current > previous) return "increase";
   if (current < previous) return "decrease";
   return "stable";
+}
+
+// --- Client-side filters (enriched fields only; dataset = full fetch for date + status) ---
+
+export type ExecutiveSummaryFilterState = {
+  project: string;
+  environment: string;
+  applicationName: string;
+};
+
+export function applyExecutiveSummaryFilters(
+  items: ExecutiveSummaryDeployment[],
+  f: ExecutiveSummaryFilterState
+): ExecutiveSummaryDeployment[] {
+  return items.filter((row) => {
+    if (f.project && row.projectName !== f.project) return false;
+    if (f.environment && row.environment !== f.environment) return false;
+    if (f.applicationName && row.applicationName !== f.applicationName) return false;
+    return true;
+  });
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].filter((v) => v.length > 0).sort((a, b) => a.localeCompare(b));
+}
+
+export function projectOptionsFromDataset(items: ExecutiveSummaryDeployment[]): string[] {
+  return uniqueSorted(items.map((i) => i.projectName));
+}
+
+export function environmentOptionsFromDataset(items: ExecutiveSummaryDeployment[], projectFilter: string): string[] {
+  const base = projectFilter ? items.filter((i) => i.projectName === projectFilter) : items;
+  return uniqueSorted(base.map((i) => i.environment));
+}
+
+export function applicationNameOptionsFromDataset(
+  items: ExecutiveSummaryDeployment[],
+  projectFilter: string,
+  environmentFilter: string
+): string[] {
+  let base = items;
+  if (projectFilter) base = base.filter((i) => i.projectName === projectFilter);
+  if (environmentFilter) base = base.filter((i) => i.environment === environmentFilter);
+  return uniqueSorted(base.map((i) => i.applicationName));
 }
