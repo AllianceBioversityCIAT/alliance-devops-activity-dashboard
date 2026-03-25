@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { healthHandler } from "./healthHandler.js";
 import { deploymentsHandler } from "./deploymentsHandler.js";
+import { executiveSummaryDeploymentsHandler } from "./executiveSummaryDeploymentsHandler.js";
 import { authMiddleware } from "./authMiddleware.js";
 import { loginHandler } from "./authHandler.js";
 import { authorizeHandler, exchangeHandler } from "./oauthHandlers.js";
@@ -17,6 +18,7 @@ export function createRouter(): Router {
   // Mock protected endpoints (auth to be enforced in Phase 2)
   router.get("/deployments", authMiddleware, deploymentsHandler);
   router.get("/api/deployments", authMiddleware, deploymentsHandler);
+  router.get("/api/executive-summary/deployments", authMiddleware, executiveSummaryDeploymentsHandler);
 
   return router;
 }

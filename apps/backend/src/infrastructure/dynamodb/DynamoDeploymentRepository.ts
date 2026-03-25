@@ -93,6 +93,7 @@ function mapRecordToDomain(item: Record<string, any>): DeploymentExecution {
   return {
     id: String(item.id ?? ""),
     application: String(item.job ?? ""),
+    environment: item.environment != null && String(item.environment).trim() !== "" ? String(item.environment).trim() : undefined,
     executedAt: String(item.buildDate ?? ""),
     buildNumber: typeof item.buildNumber === "number" ? item.buildNumber : Number(item.buildNumber) || undefined,
     status: normalizeStatus(item.result),

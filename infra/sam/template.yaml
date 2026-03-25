@@ -19,6 +19,10 @@ Parameters:
   DynamoDbTableName:
     Type: String
     Default: jenkinsexecutions_test
+  DeploymentMetadataTableName:
+    Type: String
+    Default: deployment_metadata
+    Description: DynamoDB table for job metadata (partition key job_name; Query by job_name only)
   CognitoUserPoolId:
     Type: String
     Default: ""
@@ -100,6 +104,7 @@ Resources:
           AWS_ACCESS_KEY_ID: !Ref AwsAccessKeyId
           AWS_SECRET_ACCESS_KEY: !Ref AwsSecretAccessKey
           DYNAMODB_TABLE_NAME: !Ref DynamoDbTableName
+          DYNAMODB_DEPLOYMENT_METADATA_TABLE_NAME: !Ref DeploymentMetadataTableName
           COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
           COGNITO_APP_CLIENT_ID: !Ref CognitoAppClientId
           COGNITO_CLIENT_SECRET: !Ref CognitoClientSecret
@@ -116,6 +121,11 @@ Resources:
                 - dynamodb:Scan
                 - dynamodb:DescribeTable
               Resource: !Sub "arn:aws:dynamodb:${AwsRegion}:${AWS::AccountId}:table/${DynamoDbTableName}"
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:DescribeTable
+              Resource: !Sub "arn:aws:dynamodb:${AwsRegion}:${AWS::AccountId}:table/${DeploymentMetadataTableName}"
     Metadata:
       BuildMethod: esbuild
       BuildProperties:

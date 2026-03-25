@@ -1,29 +1,47 @@
 import Head from "next/head";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
-import { Deployment } from "@domain/Deployment";
-import { fetchDeployments } from "@infrastructure/api/deploymentsApi";
+import type { ExecutiveSummaryDeployment } from "@domain/ExecutiveSummaryDeployment";
+import { fetchExecutiveSummaryDeployments } from "@infrastructure/api/executiveSummaryApi";
 import { isAuthenticated, signOut } from "../src/infrastructure/auth/CognitoClient";
 import {
   computeSummaryKpis,
   failureTrend,
   groupByApplication,
+  groupByProject,
   mostActiveApplication,
+  mostActiveProject,
   repeatedFailures,
   topFailingApplications
 } from "@application/executiveSummary";
+import { logExecutiveSummaryFetchPage, logExecutiveSummaryUiFinalDataset } from "@application/executiveSummaryDatasetDebug";
 
 type StatusFilter = "" | "success" | "failure";
+
+function firstDayOfCurrentMonthYyyyMmDd(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}-01`;
+}
+
+function todayYyyyMmDd(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 export default function SummaryPage() {
   const router = useRouter();
   const [checked, setChecked] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<Deployment[]>([]);
+  const [items, setItems] = useState<ExecutiveSummaryDeployment[]>([]);
 
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
+  const [fromDate, setFromDate] = useState(() => firstDayOfCurrentMonthYyyyMmDd());
+  const [toDate, setToDate] = useState(() => todayYyyyMmDd());
   const [application, setApplication] = useState("");
   const [status, setStatus] = useState<StatusFilter>("");
 
@@ -48,10 +66,9 @@ export default function SummaryPage() {
       try {
         const pageSize = 100;
         let page = 1;
-        let all: Deployment[] = [];
-        // Reuse existing endpoint; aggregate pages client-side for summary calculations.
+        let all: ExecutiveSummaryDeployment[] = [];
         while (true) {
-          const result = await fetchDeployments(
+          const result = await fetchExecutiveSummaryDeployments(
             {
               from: fromDate ? `${fromDate}T00:00:00.000Z` : undefined,
               to: toDate ? `${toDate}T23:59:59.999Z` : undefined,
@@ -61,6 +78,16 @@ export default function SummaryPage() {
             page,
             pageSize
           );
+          if (process.env.NEXT_PUBLIC_EXEC_SUMMARY_DEBUG === "true") {
+            const jobsThisPage = [...new Set(result.items.map((r) => r.application))].sort();
+            logExecutiveSummaryFetchPage({
+              page,
+              pageSize,
+              itemsThisPage: result.items.length,
+              uniqueJobNamesThisPage: jobsThisPage,
+              cumulativeRowCount: all.length + result.items.length
+            });
+          }
           all = all.concat(result.items);
 
           const total = result.pageInfo.total;
@@ -89,10 +116,17 @@ export default function SummaryPage() {
 
   const kpis = useMemo(() => computeSummaryKpis(items), [items]);
   const byApp = useMemo(() => groupByApplication(items), [items]);
+  const byProject = useMemo(() => groupByProject(items), [items]);
   const topFailing = useMemo(() => topFailingApplications(items), [items]);
   const repeated = useMemo(() => repeatedFailures(items), [items]);
   const mostActive = useMemo(() => mostActiveApplication(items), [items]);
+  const mostActiveProj = useMemo(() => mostActiveProject(items), [items]);
   const trend = useMemo(() => failureTrend(items), [items]);
+
+  useEffect(() => {
+    if (loading) return;
+    logExecutiveSummaryUiFinalDataset(items);
+  }, [items, loading]);
 
   if (!checked) return null;
 
@@ -185,9 +219,19 @@ export default function SummaryPage() {
         </section>
 
         <section className="panel block">
+          <h2 className="block-title">Breakdown by Project</h2>
+          <div className="rows">
+            {byProject.map((x) => (
+              <div key={x.project} className="row"><span>{x.project}</span><span>Total: {x.total} | Failures: {x.failures}</span></div>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel block">
           <h2 className="block-title">Insights</h2>
           <ul className="insights">
             <li>Most active application: <strong>{mostActive ? `${mostActive.application} (${mostActive.count})` : "N/A"}</strong></li>
+            <li>Most active project: <strong>{mostActiveProj ? `${mostActiveProj.project} (${mostActiveProj.count})` : "N/A"}</strong></li>
             <li>Top failing application: <strong>{topFailing[0] ? `${topFailing[0].application} (${topFailing[0].failures} failures)` : "N/A"}</strong></li>
             <li>Failure trend vs previous period: <strong>{trend}</strong></li>
           </ul>

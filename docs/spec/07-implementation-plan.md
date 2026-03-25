@@ -11,6 +11,7 @@ The implementation must follow an incremental approach aligned with the defined 
 The system will be developed in small, controlled iterations.
 
 Each phase must:
+
 - deliver working functionality
 - be testable locally
 - align with the defined spec
@@ -23,19 +24,23 @@ The goal is to progressively move from a local MVP to a fully deployed serverles
 ## 2. Technology Decisions
 
 ### Frontend
+
 - Framework: Next.js (static rendering)
 - Language: TypeScript
 - Styling: simple (no heavy UI framework required for MVP)
 
 ### Backend
+
 - Runtime: Node.js
 - Language: TypeScript
 - Architecture: Hexagonal (domain, application, infrastructure, interfaces)
 
 ### Infrastructure
+
 - AWS SAM (Infrastructure as Code)
 
 ### Cloud Services
+
 - S3 + CloudFront (frontend)
 - API Gateway + Lambda (backend)
 - Cognito (authentication)
@@ -53,6 +58,7 @@ The goal is to progressively move from a local MVP to a fully deployed serverles
 Establish a working local development environment with base structure and tooling.
 
 **Tasks:**
+
 - Initialize frontend project (Next.js)
 - Initialize backend project (Node.js + TypeScript)
 - Configure ESLint and Prettier
@@ -61,15 +67,18 @@ Establish a working local development environment with base structure and toolin
 - Implement basic project structure (hexagonal for backend)
 
 **Backend:**
+
 - Create `/health` endpoint
 - Create mock `/deployments` endpoint
 
 **Frontend:**
+
 - Create basic layout
 - Create login page (UI only, no Cognito yet)
 - Create dashboard page (placeholder)
 
 **Acceptance Criteria:**
+
 - Frontend runs locally
 - Backend runs locally
 - API can be called from frontend
@@ -83,6 +92,7 @@ Establish a working local development environment with base structure and toolin
 Enable secure authentication using Amazon Cognito.
 
 **Tasks:**
+
 - Implement login with email/password
 - Integrate Cognito in frontend
 - Store authentication tokens
@@ -90,6 +100,7 @@ Enable secure authentication using Amazon Cognito.
 - Implement backend JWT validation middleware
 
 **Acceptance Criteria:**
+
 - Users can log in using Cognito
 - Unauthorized users cannot access dashboard
 - Backend rejects requests without valid token
@@ -102,6 +113,7 @@ Enable secure authentication using Amazon Cognito.
 Connect backend to DynamoDB and retrieve real deployment data.
 
 **Tasks:**
+
 - Implement DynamoDB adapter (infrastructure layer)
 - Implement repository interface
 - Implement use case: list deployments
@@ -109,6 +121,7 @@ Connect backend to DynamoDB and retrieve real deployment data.
 - Support filtering (date, job, status)
 
 **Acceptance Criteria:**
+
 - Backend retrieves real data from DynamoDB
 - Data is correctly mapped to domain model
 - API returns clean, structured responses
@@ -121,6 +134,7 @@ Connect backend to DynamoDB and retrieve real deployment data.
 Provide visual insights into deployment activity.
 
 **Tasks:**
+
 - Implement summary metrics (total, success, failure)
 - Implement deployments per application
 - Implement deployments over time
@@ -129,6 +143,7 @@ Provide visual insights into deployment activity.
 - Handle loading, empty, and error states
 
 **Acceptance Criteria:**
+
 - Dashboard displays real data
 - Filters work correctly
 - UI is clear and usable
@@ -141,6 +156,7 @@ Provide visual insights into deployment activity.
 Deploy the system to AWS using Infrastructure as Code.
 
 **Tasks:**
+
 - Create SAM template in `infra/`
 - Define Lambda, API Gateway, IAM roles
 - Define S3 and CloudFront for frontend
@@ -148,6 +164,7 @@ Deploy the system to AWS using Infrastructure as Code.
 - Configure deployment per environment
 
 **Acceptance Criteria:**
+
 - Backend deployed via SAM
 - Frontend deployed to S3 + CloudFront
 - Application accessible via public URL
@@ -160,6 +177,7 @@ Deploy the system to AWS using Infrastructure as Code.
 Ensure full system integration and correctness.
 
 **Tasks:**
+
 - Validate authentication flow end-to-end
 - Validate frontend ↔ backend integration
 - Validate backend ↔ DynamoDB integration
@@ -167,6 +185,7 @@ Ensure full system integration and correctness.
 - Fix issues and refine UX
 
 **Acceptance Criteria:**
+
 - End-to-end flow works correctly
 - No critical errors
 - Application is stable
@@ -179,6 +198,7 @@ Ensure full system integration and correctness.
 Improve the visual quality, usability, and consistency of the user interface without modifying core functionality.
 
 **Tasks:**
+
 - Improve login page layout (split-screen design)
 - Improve dashboard layout and visual hierarchy
 - Standardize spacing, typography, and alignment
@@ -189,12 +209,14 @@ Improve the visual quality, usability, and consistency of the user interface wit
 - Apply consistent styling across components
 
 **Scope Constraints:**
+
 - No changes to business logic
 - No changes to authentication flow
 - No backend modifications
 - No new features outside the defined MVP scope
 
 **Acceptance Criteria:**
+
 - Login page has a clean split layout (image + login section)
 - Dashboard is visually clear and easy to understand
 - Filters are usable and intuitive
@@ -203,6 +225,47 @@ Improve the visual quality, usability, and consistency of the user interface wit
 - Application is responsive on different screen sizes
 
 ---
+
+### Phase 9 — Executive Summary Metadata Enrichment
+
+**Goal:**
+Enhance the Executive Summary by enriching deployment data with functional metadata and applying a default current-month date range, without affecting the existing dashboard.
+
+**Tasks:**
+
+- Add integration with `deployment_metadata` in DynamoDB
+- Match metadata using `job_name` and `environment`
+- Enrich Executive Summary records with:
+  - `application_name`
+  - `project_name`
+  - normalized `environment`
+- Implement fallback classification for unmapped records:
+  - `project_name = OTHERS`
+  - `application_name = job_name`
+  - `environment = deployment environment or UNKNOWN`
+- Apply enrichment only to Executive Summary data processing
+- Set default Executive Summary date filters to the current month:
+  - `dateFrom` = first day of current month
+  - `dateTo` = current date
+- Ensure date filters remain editable by the user
+- Ensure no changes to the main dashboard behavior or calculations
+
+**Scope Constraints:**
+
+- No changes to existing dashboard functionality
+- No changes to dashboard grouping or calculation logic
+- No requirement for full metadata coverage before release
+- No breaking changes to current API consumers
+
+**Acceptance Criteria:**
+
+- Executive Summary uses `deployment_metadata` to enrich records
+- Unmapped records are grouped under `OTHERS`
+- Executive Summary loads with current month as default date range
+- Users can modify the date filters
+- Dashboard remains unchanged and fully functional
+- No errors occur when metadata is missing
+- Executive Summary groupings and insights use enriched metadata instead of raw job names
 
 ---
 
@@ -230,34 +293,40 @@ This module focuses on insights and trends rather than raw operational data.
 module: executive_summary
 
 data_source:
-  - deployments (existing API)
+
+- deployments (existing API)
 
 metrics:
-  - totalDeployments
-  - successCount
-  - failureCount
-  - successRate
+
+- totalDeployments
+- successCount
+- failureCount
+- successRate
 
 groupings:
-  - byApplication
-  - byDate
+
+- byApplication
+- byDate
 
 insights:
-  - topFailingApplications (top 3 by failure count)
-  - mostActiveApplication
-  - failureTrend (increase/decrease vs previous period)
+
+- topFailingApplications (top 3 by failure count)
+- mostActiveApplication
+- failureTrend (increase/decrease vs previous period)
 
 filters:
-  - dateFrom
-  - dateTo
-  - application
-  - status
+
+- dateFrom
+- dateTo
+- application
+- status
 
 constraints:
-  - calculations must be deterministic
-  - data must be derived from real deployment records
-  - no inferred or synthetic data
-  - results must reflect selected filters
+
+- calculations must be deterministic
+- data must be derived from real deployment records
+- no inferred or synthetic data
+- results must reflect selected filters
 
 ---
 
@@ -273,6 +342,7 @@ Display key metrics for the selected period:
 - success rate
 
 Optional (if feasible):
+
 - comparison vs previous period
 
 ---
@@ -365,6 +435,8 @@ Provide quick, human-readable conclusions.
 
 ---
 
+---
+
 ## 4. Development Workflow
 
 Each phase must follow this workflow:
@@ -383,6 +455,7 @@ Each phase must follow this workflow:
 Cursor must be used as an implementation assistant, not as a black-box generator.
 
 ### Rules:
+
 - Always reference `docs/spec`
 - Implement one phase at a time
 - Do not generate the entire system at once
@@ -399,3 +472,4 @@ Requirements:
 - Focus only on local setup and basic structure
 - Ensure project runs locally
 - Follow hexagonal architecture for backend
+```
