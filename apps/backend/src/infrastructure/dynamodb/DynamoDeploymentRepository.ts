@@ -1,7 +1,13 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand, ScanCommandInput } from "@aws-sdk/lib-dynamodb";
 import { getConfig } from "../config/env.js";
-import { DeploymentRepository, ListDeploymentsFilters, ListDeploymentsPage, ListDeploymentsResult } from "../../domain/ports/DeploymentRepository.js";
+import {
+  DeploymentRepository,
+  DeploymentsSortBy,
+  ListDeploymentsFilters,
+  ListDeploymentsPage,
+  ListDeploymentsResult
+} from "../../domain/ports/DeploymentRepository.js";
 import { DeploymentExecution } from "../../domain/DeploymentExecution.js";
 
 // MVP note:
@@ -69,15 +75,71 @@ export class DynamoDeploymentRepository implements DeploymentRepository {
     const scanResp = await this.doc.send(new ScanCommand(input));
     const items = (scanResp.Items ?? []).map(mapRecordToDomain);
 
-    // Simple page/pageSize over the scanned subset
+    const sortBy = filters.sortBy ?? "executedAt";
+    const sortOrder = filters.sortOrder ?? "desc";
+    const sorted = sortDeployments(items, sortBy, sortOrder);
+
     const start = (page.page - 1) * page.pageSize;
-    const paged = items.slice(start, start + page.pageSize);
+    const paged = sorted.slice(start, start + page.pageSize);
 
     return {
       items: paged,
-      total: items.length // best-effort total across scanned subset
+      total: sorted.length
     };
   }
+}
+
+function sortDeployments(items: DeploymentExecution[], sortBy: DeploymentsSortBy, order: "asc" | "desc"): DeploymentExecution[] {
+  const dir = order === "asc" ? 1 : -1;
+  return [...items].sort((a, b) => {
+    if (sortBy === "buildNumber") {
+      return compareBuildNumber(a, b, order);
+    }
+    let c = 0;
+    switch (sortBy) {
+      case "executedAt": {
+        const va = a.executedAt || "";
+        const vb = b.executedAt || "";
+        c = va.localeCompare(vb);
+        break;
+      }
+      case "application":
+        c = (a.application || "").localeCompare(b.application || "");
+        break;
+      case "status":
+        c = statusSortRank(a.status) - statusSortRank(b.status);
+        break;
+      case "executedBy":
+        c = (a.executedBy || "").localeCompare(b.executedBy || "");
+        break;
+      case "stage":
+        c = (a.stage || "").localeCompare(b.stage || "");
+        break;
+      default:
+        c = 0;
+    }
+    if (c !== 0) return dir * c;
+    return (a.id || "").localeCompare(b.id || "");
+  });
+}
+
+/** Null / missing build numbers sort last in both directions. */
+function compareBuildNumber(a: DeploymentExecution, b: DeploymentExecution, order: "asc" | "desc"): number {
+  const na = a.buildNumber;
+  const nb = b.buildNumber;
+  if (na == null && nb == null) return (a.id || "").localeCompare(b.id || "");
+  if (na == null) return 1;
+  if (nb == null) return -1;
+  const d = na - nb;
+  if (d !== 0) return order === "asc" ? d : -d;
+  return (a.id || "").localeCompare(b.id || "");
+}
+
+/** success > failure > unknown (lower rank first when ascending). */
+function statusSortRank(s: DeploymentExecution["status"]): number {
+  if (s === "success") return 0;
+  if (s === "failure") return 1;
+  return 2;
 }
 
 function normalizeStatus(raw?: string | null): "success" | "failure" | "unknown" {

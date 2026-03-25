@@ -3,11 +3,15 @@ import { getIdToken } from "../auth/CognitoClient";
 import { getEnv } from "../config/env";
 import { ApiClient } from "./ApiClient";
 
+export type DeploymentsSortBy = "executedAt" | "application" | "buildNumber" | "status" | "executedBy" | "stage";
+
 export type DeploymentFilters = {
   from?: string;
   to?: string;
   application?: string;
   status?: "success" | "failure";
+  sortBy?: DeploymentsSortBy;
+  sortOrder?: "asc" | "desc";
 };
 
 export type DeploymentsApiResponse = {
@@ -26,6 +30,8 @@ export async function fetchDeployments(filters: DeploymentFilters, page: number,
   if (filters.to) query.set("to", filters.to);
   if (filters.application) query.set("application", filters.application);
   if (filters.status) query.set("status", filters.status);
+  if (filters.sortBy) query.set("sortBy", filters.sortBy);
+  if (filters.sortOrder) query.set("sortOrder", filters.sortOrder);
   query.set("page", String(page));
   query.set("pageSize", String(pageSize));
 

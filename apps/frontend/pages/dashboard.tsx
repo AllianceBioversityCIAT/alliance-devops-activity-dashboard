@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { isAuthenticated, signOut } from "../src/infrastructure/auth/CognitoClient";
 import { useRouter } from "next/router";
 import { Deployment } from "@domain/Deployment";
-import { fetchDeployments } from "@infrastructure/api/deploymentsApi";
+import { fetchDeployments, type DeploymentsSortBy } from "@infrastructure/api/deploymentsApi";
 import { groupByApplication } from "@application/dashboard";
 
 export default function DashboardPage() {
@@ -21,6 +21,8 @@ export default function DashboardPage() {
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [sortBy, setSortBy] = useState<DeploymentsSortBy>("executedAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   useEffect(() => {
     (async () => {
@@ -58,7 +60,9 @@ export default function DashboardPage() {
             from: fromDate ? `${fromDate}T00:00:00.000Z` : undefined,
             to: toDate ? `${toDate}T23:59:59.999Z` : undefined,
             application: application || undefined,
-            status: status || undefined
+            status: status || undefined,
+            sortBy,
+            sortOrder
           },
           page,
           pageSize
@@ -80,7 +84,17 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [checked, fromDate, toDate, application, status, page, pageSize]);
+  }, [checked, fromDate, toDate, application, status, page, pageSize, sortBy, sortOrder]);
+
+  const handleSortColumn = (column: DeploymentsSortBy) => {
+    setPage(1);
+    if (sortBy !== column) {
+      setSortBy(column);
+      setSortOrder("asc");
+      return;
+    }
+    setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+  };
 
   const byApplication = groupByApplication(items);
   const hasNextPage = typeof total === "number" ? page * pageSize < total : items.length === pageSize;
@@ -166,13 +180,43 @@ export default function DashboardPage() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Application</th>
-                  <th>Execution date</th>
-                  <th>Build #</th>
-                  <th>Status</th>
-                  <th>User</th>
-                  <th>Stage</th>
-                  <th>Pipeline</th>
+                  <th scope="col">
+                    <button type="button" className={`th-sort-btn ${sortBy === "application" ? "is-active" : ""}`} onClick={() => handleSortColumn("application")}>
+                      Application
+                      {sortBy === "application" ? <span className="sort-caret">{sortOrder === "asc" ? "↑" : "↓"}</span> : null}
+                    </button>
+                  </th>
+                  <th scope="col">
+                    <button type="button" className={`th-sort-btn ${sortBy === "executedAt" ? "is-active" : ""}`} onClick={() => handleSortColumn("executedAt")}>
+                      Execution date
+                      {sortBy === "executedAt" ? <span className="sort-caret">{sortOrder === "asc" ? "↑" : "↓"}</span> : null}
+                    </button>
+                  </th>
+                  <th scope="col">
+                    <button type="button" className={`th-sort-btn ${sortBy === "buildNumber" ? "is-active" : ""}`} onClick={() => handleSortColumn("buildNumber")}>
+                      Build #
+                      {sortBy === "buildNumber" ? <span className="sort-caret">{sortOrder === "asc" ? "↑" : "↓"}</span> : null}
+                    </button>
+                  </th>
+                  <th scope="col">
+                    <button type="button" className={`th-sort-btn ${sortBy === "status" ? "is-active" : ""}`} onClick={() => handleSortColumn("status")}>
+                      Status
+                      {sortBy === "status" ? <span className="sort-caret">{sortOrder === "asc" ? "↑" : "↓"}</span> : null}
+                    </button>
+                  </th>
+                  <th scope="col">
+                    <button type="button" className={`th-sort-btn ${sortBy === "executedBy" ? "is-active" : ""}`} onClick={() => handleSortColumn("executedBy")}>
+                      User
+                      {sortBy === "executedBy" ? <span className="sort-caret">{sortOrder === "asc" ? "↑" : "↓"}</span> : null}
+                    </button>
+                  </th>
+                  <th scope="col">
+                    <button type="button" className={`th-sort-btn ${sortBy === "stage" ? "is-active" : ""}`} onClick={() => handleSortColumn("stage")}>
+                      Stage
+                      {sortBy === "stage" ? <span className="sort-caret">{sortOrder === "asc" ? "↑" : "↓"}</span> : null}
+                    </button>
+                  </th>
+                  <th scope="col">Pipeline</th>
                 </tr>
               </thead>
               <tbody>
@@ -188,10 +232,19 @@ export default function DashboardPage() {
                     </td>
                     <td>{item.executedBy ?? "-"}</td>
                     <td>{item.stage ?? "-"}</td>
-                    <td>
+                    <td className="td-pipeline">
                       {item.pipelineUrl ? (
-                        <a href={item.pipelineUrl} target="_blank" rel="noreferrer">
-                          Open
+                        <a
+                          href={item.pipelineUrl}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="btn-pipeline"
+                          aria-label="Open deployment pipeline in a new tab"
+                        >
+                          <span className="btn-pipeline-icon" aria-hidden="true">
+                            ↗
+                          </span>
+                          View
                         </a>
                       ) : (
                         "-"
@@ -311,7 +364,62 @@ export default function DashboardPage() {
         .table-wrap { width: 100%; overflow-x: auto; }
         .table { width: 100%; border-collapse: collapse; min-width: 840px; }
         .table th, .table td { text-align: left; border-bottom: 1px solid #eaecf0; padding: 9px 8px; font-size: 13px; vertical-align: top; }
-        .table th { background: #f9fafb; color: #344054; font-weight: 600; }
+        .table td.td-pipeline { vertical-align: middle; }
+        .table th { background: #f9fafb; color: #344054; font-weight: 600; vertical-align: middle; }
+        .th-sort-btn {
+          border: 0;
+          background: transparent;
+          padding: 0;
+          margin: 0;
+          font: inherit;
+          font-weight: 600;
+          color: inherit;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          text-align: left;
+          border-radius: 6px;
+        }
+        .th-sort-btn:hover { color: #101828; background: #f2f4f7; }
+        .th-sort-btn.is-active { color: #1d4ed8; }
+        .sort-caret { font-size: 12px; font-weight: 700; }
+
+        .btn-pipeline {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 5px 11px;
+          font-size: 12px;
+          font-weight: 600;
+          line-height: 1.2;
+          text-decoration: none;
+          color: #1d4ed8;
+          background: #fff;
+          border: 1px solid #1d4ed8;
+          border-radius: 8px;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+        }
+        .btn-pipeline:hover {
+          background: #eff6ff;
+          border-color: #1e40af;
+          color: #1e40af;
+          box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+        }
+        .btn-pipeline:focus-visible {
+          outline: 2px solid #2563eb;
+          outline-offset: 2px;
+        }
+        .btn-pipeline:active {
+          transform: scale(0.98);
+        }
+        .btn-pipeline-icon {
+          font-size: 11px;
+          line-height: 1;
+          opacity: 0.95;
+        }
 
         .pill { display: inline-block; border-radius: 999px; padding: 2px 9px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
         .pill-success { background: #dcfce7; color: #166534; }
@@ -334,16 +442,3 @@ export default function DashboardPage() {
     </>
   );
 }
-
-const thStyle: CSSProperties = {
-  textAlign: "left",
-  borderBottom: "1px solid #e5e7eb",
-  padding: "8px 6px",
-  fontSize: 13
-};
-
-const tdStyle: CSSProperties = {
-  borderBottom: "1px solid #f3f4f6",
-  padding: "8px 6px",
-  fontSize: 13
-};
