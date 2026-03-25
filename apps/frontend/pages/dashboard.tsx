@@ -6,6 +6,24 @@ import { Deployment } from "@domain/Deployment";
 import { fetchDeployments, type DeploymentsSortBy } from "@infrastructure/api/deploymentsApi";
 import { groupByApplication } from "@application/dashboard";
 
+const DATE_INPUT_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function toDateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getCurrentMonthDateRange(): { fromDate: string; toDate: string } {
+  const today = new Date();
+  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  return {
+    fromDate: toDateInputValue(firstDayOfMonth),
+    toDate: toDateInputValue(today)
+  };
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [checked, setChecked] = useState(false);
@@ -43,6 +61,14 @@ export default function DashboardPage() {
         router.replace("/login");
         return;
       }
+
+      const defaultRange = getCurrentMonthDateRange();
+      const queryFromDate = params.get("fromDate");
+      const queryToDate = params.get("toDate");
+
+      setFromDate(queryFromDate && DATE_INPUT_RE.test(queryFromDate) ? queryFromDate : defaultRange.fromDate);
+      setToDate(queryToDate && DATE_INPUT_RE.test(queryToDate) ? queryToDate : defaultRange.toDate);
+
       setChecked(true);
     })();
   }, [router]);
