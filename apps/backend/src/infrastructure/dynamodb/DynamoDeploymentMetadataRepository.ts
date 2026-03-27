@@ -1,7 +1,10 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, QueryCommand, ScanCommand, type ScanCommandInput } from "@aws-sdk/lib-dynamodb";
 import type { DeploymentMetadata } from "../../domain/DeploymentMetadata.js";
-import type { DeploymentMetadataRepository } from "../../domain/ports/DeploymentMetadataRepository.js";
+import type {
+  DeploymentMetadataRepository,
+  MetadataJobNameFilters
+} from "../../domain/ports/DeploymentMetadataRepository.js";
 import { getConfig } from "../config/env.js";
 import { readNonEmptyString } from "./metadataAttributes.js";
 
@@ -35,7 +38,6 @@ export class DynamoDeploymentMetadataRepository implements DeploymentMetadataRep
     }
 
     const j = jobName.trim();
-    console.log("j", j);
     if (!j) {
       return null;
     }
@@ -67,6 +69,59 @@ export class DynamoDeploymentMetadataRepository implements DeploymentMetadataRep
     }
 
     return mapped;
+  }
+
+  async listJobNamesForFilters(filters: MetadataJobNameFilters): Promise<string[]> {
+    if (!this.tableName) {
+      return [];
+    }
+
+    const exprs: string[] = [];
+    const names: Record<string, string> = {};
+    const values: Record<string, unknown> = {};
+
+    if (filters.projectName?.trim()) {
+      exprs.push("#pn = :pn");
+      names["#pn"] = "project_name";
+      values[":pn"] = filters.projectName.trim();
+    }
+    if (filters.environment?.trim()) {
+      exprs.push("#env = :env");
+      names["#env"] = "environment";
+      values[":env"] = filters.environment.trim();
+    }
+    if (filters.applicationName?.trim()) {
+      exprs.push("#an = :an");
+      names["#an"] = "application_name";
+      values[":an"] = filters.applicationName.trim();
+    }
+
+    const out = new Set<string>();
+    let exclusiveStartKey: Record<string, unknown> | undefined;
+
+    do {
+      const input: ScanCommandInput = {
+        TableName: this.tableName,
+        ...(exprs.length > 0
+          ? {
+              FilterExpression: exprs.join(" AND "),
+              ExpressionAttributeNames: names,
+              ExpressionAttributeValues: values
+            }
+          : {})
+      };
+      if (exclusiveStartKey) {
+        input.ExclusiveStartKey = exclusiveStartKey;
+      }
+      const resp = await this.doc.send(new ScanCommand(input));
+      for (const item of resp.Items ?? []) {
+        const jn = readNonEmptyString(item as Record<string, unknown>, ["job_name", "jobName", "JobName"]);
+        if (jn) out.add(jn.trim());
+      }
+      exclusiveStartKey = resp.LastEvaluatedKey as Record<string, unknown> | undefined;
+    } while (exclusiveStartKey);
+
+    return [...out].sort((a, b) => a.localeCompare(b));
   }
 }
 

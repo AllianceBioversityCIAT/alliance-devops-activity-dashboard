@@ -1,35 +1,69 @@
 import type { Request, Response } from "express";
 import { ListEnrichedDeployments } from "../../application/usecases/ListEnrichedDeployments.js";
-import { DynamoDeploymentRepository } from "../../infrastructure/dynamodb/DynamoDeploymentRepository.js";
+import { DynamoExecutiveSummaryExecutionsRepository } from "../../infrastructure/dynamodb/DynamoExecutiveSummaryExecutionsRepository.js";
 import { DynamoDeploymentMetadataRepository } from "../../infrastructure/dynamodb/DynamoDeploymentMetadataRepository.js";
 import { getConfig } from "../../infrastructure/config/env.js";
 
+/** Default range: previous calendar month (UTC), inclusive. */
+function defaultPreviousMonthRangeIso(): { from: string; to: string } {
+  const now = new Date();
+  const firstThisMonthUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0);
+  const lastMonthEnd = new Date(firstThisMonthUtc);
+  lastMonthEnd.setUTCMilliseconds(-1);
+  const lastMonthStart = new Date(Date.UTC(lastMonthEnd.getUTCFullYear(), lastMonthEnd.getUTCMonth(), 1, 0, 0, 0, 0));
+  return {
+    from: lastMonthStart.toISOString(),
+    to: lastMonthEnd.toISOString()
+  };
+}
+
 export async function executiveSummaryDeploymentsHandler(req: Request, res: Response) {
   try {
-    const from = typeof req.query.from === "string" ? req.query.from : undefined;
-    const to = typeof req.query.to === "string" ? req.query.to : undefined;
-    const application = typeof req.query.application === "string" ? req.query.application : undefined;
+    let from = typeof req.query.from === "string" ? req.query.from.trim() : "";
+    let to = typeof req.query.to === "string" ? req.query.to.trim() : "";
+    if (!from || !to) {
+      const d = defaultPreviousMonthRangeIso();
+      from = d.from;
+      to = d.to;
+    }
+
+    if (Date.parse(from) > Date.parse(to)) {
+      return res.status(400).json({ error: "from must be before or equal to to" });
+    }
+
     const statusQ = typeof req.query.status === "string" ? req.query.status : undefined;
     const status = statusQ === "success" || statusQ === "failure" || statusQ === "unknown" ? statusQ : undefined;
 
-    const page = Number(req.query.page ?? 1);
-    const pageSize = Number(req.query.pageSize ?? 10);
+    const projectName = typeof req.query.projectName === "string" ? req.query.projectName : undefined;
+    const environment = typeof req.query.environment === "string" ? req.query.environment : undefined;
+    const applicationName = typeof req.query.applicationName === "string" ? req.query.applicationName : undefined;
+    const job = typeof req.query.job === "string" ? req.query.job : undefined;
+    const legacyApplication = typeof req.query.application === "string" ? req.query.application : undefined;
+    const jobExact = job?.trim() || legacyApplication?.trim() || undefined;
 
-    const safePageNum = Number.isFinite(page) ? page : 1;
-    const safePageSizeNum = Number.isFinite(pageSize) ? pageSize : 10;
     const debug = getConfig().logLevel === "debug";
 
     if (debug) {
       console.debug("[executive_summary:request]", {
         path: "/api/executive-summary/deployments",
-        query: { from, to, application, status, page: safePageNum, pageSize: safePageSizeNum }
+        query: { from, to, status, projectName, environment, applicationName, job: jobExact }
       });
     }
 
-    const usecase = new ListEnrichedDeployments(new DynamoDeploymentRepository(), new DynamoDeploymentMetadataRepository());
+    const usecase = new ListEnrichedDeployments(
+      new DynamoExecutiveSummaryExecutionsRepository(),
+      new DynamoDeploymentMetadataRepository()
+    );
     const result = await usecase.execute(
-      { from, to, application, status },
-      { page: safePageNum, pageSize: safePageSizeNum },
+      {
+        from,
+        to,
+        status,
+        projectName: projectName?.trim() || undefined,
+        environment: environment?.trim() || undefined,
+        applicationName: applicationName?.trim() || undefined,
+        job: jobExact
+      },
       { debug }
     );
 

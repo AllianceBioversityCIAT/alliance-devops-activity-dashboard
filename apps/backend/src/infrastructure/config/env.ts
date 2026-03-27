@@ -1,3 +1,5 @@
+const DEFAULT_JOB_QUERY_CONCURRENCY = 15;
+
 type AppConfig = {
   port: number;
   awsRegion: string;
@@ -6,6 +8,15 @@ type AppConfig = {
   dynamoTableName: string;
   /** Caps Dynamo Scan items evaluated for /api/deployments (dashboard). Executive Summary does not use this cap. */
   dashboardDynamoMaxScannedItems: number;
+  /** Executive Summary executions: Query-only strategies (no Scan on executions table). */
+  execSummaryExecutionsStrategy: "job_gsi" | "month_gsi";
+  execSummaryJobGsiName: string | undefined;
+  execSummaryJobGsiPk: string;
+  execSummaryJobGsiSk: string;
+  execSummaryMonthGsiName: string | undefined;
+  execSummaryMonthGsiPk: string;
+  execSummaryMonthGsiSk: string;
+  execSummaryJobQueryConcurrency: number;
   /** Optional; when unset, metadata lookups are skipped (enrichment falls back to OTHERS). */
   deploymentMetadataTableName: string | undefined;
   cognitoUserPoolId: string | undefined;
@@ -34,7 +45,15 @@ export function getConfig(): AppConfig {
     FRONTEND_REDIRECT_URI,
     COGNITO_IDENTITY_PROVIDER,
     LOG_LEVEL,
-    DASHBOARD_DYNAMO_MAX_SCANNED_ITEMS
+    DASHBOARD_DYNAMO_MAX_SCANNED_ITEMS,
+    EXEC_SUMMARY_EXECUTIONS_STRATEGY,
+    EXEC_SUMMARY_JOB_GSI_NAME,
+    EXEC_SUMMARY_JOB_GSI_PK,
+    EXEC_SUMMARY_JOB_GSI_SK,
+    EXEC_SUMMARY_MONTH_GSI_NAME,
+    EXEC_SUMMARY_MONTH_GSI_PK,
+    EXEC_SUMMARY_MONTH_GSI_SK,
+    EXEC_SUMMARY_JOB_QUERY_CONCURRENCY
   } = process.env;
 
   if (!AWS_REGION) {
@@ -51,6 +70,14 @@ export function getConfig(): AppConfig {
   const dashboardDynamoMaxScannedItems =
     Number.isFinite(dashboardMaxParsed) && dashboardMaxParsed > 0 ? dashboardMaxParsed : 200_000;
 
+  const strategyRaw = (EXEC_SUMMARY_EXECUTIONS_STRATEGY ?? "job_gsi").trim().toLowerCase();
+  const execSummaryExecutionsStrategy: AppConfig["execSummaryExecutionsStrategy"] =
+    strategyRaw === "month_gsi" ? "month_gsi" : "job_gsi";
+
+  const jobConcParsed = Number(EXEC_SUMMARY_JOB_QUERY_CONCURRENCY ?? DEFAULT_JOB_QUERY_CONCURRENCY);
+  const execSummaryJobQueryConcurrency =
+    Number.isFinite(jobConcParsed) && jobConcParsed > 0 ? Math.min(50, Math.floor(jobConcParsed)) : DEFAULT_JOB_QUERY_CONCURRENCY;
+
   return {
     port: Number(PORT ?? 4000),
     awsRegion: AWS_REGION,
@@ -58,6 +85,14 @@ export function getConfig(): AppConfig {
     awsSecretAccessKey: AWS_SECRET_ACCESS_KEY,
     dynamoTableName: DYNAMODB_TABLE_NAME ?? "jenkinsexecutions_test",
     dashboardDynamoMaxScannedItems,
+    execSummaryExecutionsStrategy,
+    execSummaryJobGsiName: EXEC_SUMMARY_JOB_GSI_NAME?.trim() || undefined,
+    execSummaryJobGsiPk: (EXEC_SUMMARY_JOB_GSI_PK ?? "job").trim(),
+    execSummaryJobGsiSk: (EXEC_SUMMARY_JOB_GSI_SK ?? "buildDate").trim(),
+    execSummaryMonthGsiName: EXEC_SUMMARY_MONTH_GSI_NAME?.trim() || undefined,
+    execSummaryMonthGsiPk: (EXEC_SUMMARY_MONTH_GSI_PK ?? "buildMonth").trim(),
+    execSummaryMonthGsiSk: (EXEC_SUMMARY_MONTH_GSI_SK ?? "buildDate").trim(),
+    execSummaryJobQueryConcurrency,
     deploymentMetadataTableName: DYNAMODB_DEPLOYMENT_METADATA_TABLE_NAME?.trim() || undefined,
     cognitoUserPoolId: COGNITO_USER_POOL_ID,
     cognitoAppClientId: COGNITO_APP_CLIENT_ID,

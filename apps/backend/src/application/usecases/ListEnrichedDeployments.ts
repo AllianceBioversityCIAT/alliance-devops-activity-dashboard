@@ -1,13 +1,10 @@
 import {
   enrichDeploymentExecution,
-  type EnrichedDeploymentItem,
+  type EnrichedDeploymentItem
 } from "../enrichment/enrichDeployment.js";
-import type {
-  DeploymentRepository,
-  ListDeploymentsFilters,
-  ListDeploymentsPage,
-} from "../../domain/ports/DeploymentRepository.js";
+import type { ExecutiveSummaryExecutionsRepository } from "../../domain/ports/ExecutiveSummaryExecutionsRepository.js";
 import type { DeploymentMetadataRepository } from "../../domain/ports/DeploymentMetadataRepository.js";
+import { getConfig } from "../../infrastructure/config/env.js";
 
 export type ListEnrichedDeploymentsResponse = {
   items: EnrichedDeploymentItem[];
@@ -16,31 +13,67 @@ export type ListEnrichedDeploymentsResponse = {
 
 const TRACE_JOB = "prms-reporting-tool-dev";
 
+export type ExecutiveSummaryListFilters = {
+  from: string;
+  to: string;
+  status?: "success" | "failure" | "unknown";
+  projectName?: string;
+  environment?: string;
+  applicationName?: string;
+  /** Exact Jenkins job name; narrows job_gsi queries. */
+  job?: string;
+};
+
 export type ListEnrichedDeploymentsOptions = {
-  /** When true, logs stages A/B for this HTTP response (one page). The UI merges many pages client-side. */
+  /** When true, logs stages for this HTTP response. */
   debug?: boolean;
 };
 
 export class ListEnrichedDeployments {
   constructor(
-    private readonly deployments: DeploymentRepository,
-    private readonly metadata: DeploymentMetadataRepository,
+    private readonly executions: ExecutiveSummaryExecutionsRepository,
+    private readonly metadata: DeploymentMetadataRepository
   ) {}
 
   async execute(
-    filters: ListDeploymentsFilters,
-    page: ListDeploymentsPage,
-    options?: ListEnrichedDeploymentsOptions,
+    filters: ExecutiveSummaryListFilters,
+    options?: ListEnrichedDeploymentsOptions
   ): Promise<ListEnrichedDeploymentsResponse> {
-    const safePage = page.page > 0 ? page.page : 1;
-    const safePageSize = page.pageSize > 0 && page.pageSize <= 100 ? page.pageSize : 10;
     const debug = options?.debug === true;
+    const from = filters.from.trim();
+    const to = filters.to.trim();
+    if (!from || !to) {
+      throw new Error("from and to are required for Executive Summary");
+    }
 
-    // Full DynamoDB table scan (no maxScannedItems cap) so decision metrics include all matching rows.
-    const result = await this.deployments.list(filters, { page: safePage, pageSize: safePageSize });
+    const strategy = getConfig().execSummaryExecutionsStrategy;
+    const metaFilters = {
+      projectName: filters.projectName?.trim() || undefined,
+      environment: filters.environment?.trim() || undefined,
+      applicationName: filters.applicationName?.trim() || undefined
+    };
+
+    let jobNames: string[] = [];
+    if (strategy === "job_gsi") {
+      jobNames = await this.metadata.listJobNamesForFilters(metaFilters);
+      const jobExact = filters.job?.trim();
+      if (jobExact) {
+        jobNames = jobNames.includes(jobExact) ? [jobExact] : [];
+      }
+      if (jobNames.length === 0) {
+        return { items: [], pageInfo: { page: 1, pageSize: 0, total: 0 } };
+      }
+    }
+
+    const raw = await this.executions.listForExecutiveSummary({
+      from,
+      to,
+      status: filters.status,
+      jobNames
+    });
 
     const uniqueJobNames = new Set<string>();
-    for (const d of result.items) {
+    for (const d of raw) {
       const job = d.application.trim();
       if (job) uniqueJobNames.add(job);
     }
@@ -49,72 +82,69 @@ export class ListEnrichedDeployments {
     if (debug) {
       const prmsJobs = sortedUniqueJobs.filter((j) => j.toLowerCase().includes("prms"));
       console.debug("[executive_summary:A_raw_deployments]", {
-        note: "Single API page only. Executive Summary UI concatenates page=1,2,… until empty.",
-        page: safePage,
-        pageSize: safePageSize,
-        repositoryTotal: result.total,
-        rawDeploymentsCount: result.items.length,
+        strategy,
+        rawDeploymentsCount: raw.length,
         uniqueJobNamesCount: uniqueJobNames.size,
         sampleUniqueJobNames: sortedUniqueJobs.slice(0, 40),
         prmsLikeUniqueJobNames: prmsJobs,
-        traceJobPresentInRawPage: sortedUniqueJobs.includes(TRACE_JOB),
+        traceJobPresentInRawPage: sortedUniqueJobs.includes(TRACE_JOB)
       });
     }
 
-    const metaByJobName = new Map<
-      string,
-      Awaited<ReturnType<DeploymentMetadataRepository["getByJobName"]>>
-    >();
+    const metaByJobName = new Map<string, Awaited<ReturnType<DeploymentMetadataRepository["getByJobName"]>>>();
     await Promise.all(
       [...uniqueJobNames].map(async (jobName) => {
         const meta = await this.metadata.getByJobName(jobName);
-        console.log("meta", meta);
         metaByJobName.set(jobName, meta);
-      }),
+      })
     );
 
-    const items: EnrichedDeploymentItem[] = result.items.map((d) => {
-      console.log("d", d);
+    let items: EnrichedDeploymentItem[] = raw.map((d) => {
       const jobKey = d.application.trim();
       const meta = metaByJobName.get(jobKey) ?? null;
       return enrichDeploymentExecution(d, meta);
     });
 
+    items = items.filter((row) => matchesEnrichedFilters(row, metaFilters));
+
     if (debug) {
       const prmsEnriched = items.filter((row) => row.application.toLowerCase().includes("prms"));
       const traceRows = items.filter((row) => row.application === TRACE_JOB);
       console.debug("[executive_summary:B_after_enrichment]", {
-        page: safePage,
         enrichedDeploymentsCount: items.length,
         enrichedSampleFirst5: items.slice(0, 5).map((row) => ({
           job_name: row.application,
           application_name: row.applicationName,
           project_name: row.projectName,
-          environment: row.environment,
+          environment: row.environment
         })),
         prmsLikeEnrichedRowsCount: prmsEnriched.length,
-        prmsLikeEnrichedSample: prmsEnriched.slice(0, 8).map((row) => ({
-          job_name: row.application,
-          application_name: row.applicationName,
-          project_name: row.projectName,
-          environment: row.environment,
-        })),
         traceJobRowsOnThisPage: traceRows.map((row) => ({
           job_name: row.application,
           application_name: row.applicationName,
           project_name: row.projectName,
-          environment: row.environment,
-        })),
+          environment: row.environment
+        }))
       });
     }
 
     return {
       items,
       pageInfo: {
-        page: safePage,
-        pageSize: safePageSize,
-        total: result.total,
-      },
+        page: 1,
+        pageSize: items.length,
+        total: items.length
+      }
     };
   }
+}
+
+function matchesEnrichedFilters(
+  row: EnrichedDeploymentItem,
+  f: { projectName?: string; environment?: string; applicationName?: string }
+): boolean {
+  if (f.projectName && row.projectName !== f.projectName) return false;
+  if (f.environment && row.environment !== f.environment) return false;
+  if (f.applicationName && row.applicationName !== f.applicationName) return false;
+  return true;
 }

@@ -5,7 +5,6 @@ import type { ExecutiveSummaryDeployment } from "@domain/ExecutiveSummaryDeploym
 import { fetchExecutiveSummaryDeployments } from "@infrastructure/api/executiveSummaryApi";
 import { isAuthenticated, signOut } from "../src/infrastructure/auth/CognitoClient";
 import {
-  applyExecutiveSummaryFilters,
   applicationNameOptionsFromDataset,
   computeSummaryKpis,
   environmentOptionsFromDataset,
@@ -18,23 +17,22 @@ import {
   repeatedFailures,
   topFailingApplications
 } from "@application/executiveSummary";
-import { logExecutiveSummaryFetchPage, logExecutiveSummaryUiFinalDataset } from "@application/executiveSummaryDatasetDebug";
+import { logExecutiveSummaryUiFinalDataset } from "@application/executiveSummaryDatasetDebug";
 
 type StatusFilter = "" | "success" | "failure";
 
-function firstDayOfCurrentMonthYyyyMmDd(): string {
+function firstDayOfPreviousMonthYyyyMmDd(): string {
   const d = new Date();
   const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}-01`;
+  const m = d.getMonth();
+  const prev = new Date(y, m - 1, 1);
+  return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
-function todayYyyyMmDd(): string {
+function lastDayOfPreviousMonthYyyyMmDd(): string {
   const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  const last = new Date(d.getFullYear(), d.getMonth(), 0);
+  return `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, "0")}-${String(last.getDate()).padStart(2, "0")}`;
 }
 
 export default function SummaryPage() {
@@ -42,15 +40,15 @@ export default function SummaryPage() {
   const [checked, setChecked] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** Full dataset for the selected date range and status (all pages merged). */
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [datasetItems, setDatasetItems] = useState<ExecutiveSummaryDeployment[]>([]);
 
-  const [fromDate, setFromDate] = useState(() => firstDayOfCurrentMonthYyyyMmDd());
-  const [toDate, setToDate] = useState(() => todayYyyyMmDd());
-  const [status, setStatus] = useState<StatusFilter>("");
-  const [filterProject, setFilterProject] = useState("");
-  const [filterEnvironment, setFilterEnvironment] = useState("");
-  const [filterApplicationName, setFilterApplicationName] = useState("");
+  const [draftFromDate, setDraftFromDate] = useState(() => firstDayOfPreviousMonthYyyyMmDd());
+  const [draftToDate, setDraftToDate] = useState(() => lastDayOfPreviousMonthYyyyMmDd());
+  const [draftStatus, setDraftStatus] = useState<StatusFilter>("");
+  const [draftProject, setDraftProject] = useState("");
+  const [draftEnvironment, setDraftEnvironment] = useState("");
+  const [draftApplicationName, setDraftApplicationName] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -64,112 +62,69 @@ export default function SummaryPage() {
   }, [router]);
 
   useEffect(() => {
-    if (!checked) return;
-    let cancelled = false;
-
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const pageSize = 100;
-        let page = 1;
-        let all: ExecutiveSummaryDeployment[] = [];
-        while (true) {
-          const result = await fetchExecutiveSummaryDeployments(
-            {
-              from: fromDate ? `${fromDate}T00:00:00.000Z` : undefined,
-              to: toDate ? `${toDate}T23:59:59.999Z` : undefined,
-              status: status || undefined
-            },
-            page,
-            pageSize
-          );
-          if (process.env.NEXT_PUBLIC_EXEC_SUMMARY_DEBUG === "true") {
-            const jobsThisPage = [...new Set(result.items.map((r) => r.application))].sort();
-            logExecutiveSummaryFetchPage({
-              page,
-              pageSize,
-              itemsThisPage: result.items.length,
-              uniqueJobNamesThisPage: jobsThisPage,
-              cumulativeRowCount: all.length + result.items.length
-            });
-          }
-          all = all.concat(result.items);
-
-          const total = result.pageInfo.total;
-          const hasMoreByTotal = typeof total === "number" ? page * pageSize < total : false;
-          const hasMoreBySlice = result.items.length === pageSize;
-          if (!(hasMoreByTotal || hasMoreBySlice)) break;
-          page += 1;
-          if (page > 25) break; // MVP safety cap
-        }
-        if (cancelled) return;
-        setDatasetItems(all);
-      } catch {
-        if (!cancelled) {
-          setError("Unable to load executive summary data. Please try again.");
-          setDatasetItems([]);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [checked, fromDate, toDate, status]);
-
-  useEffect(() => {
     const projects = projectOptionsFromDataset(datasetItems);
-    if (filterProject && !projects.includes(filterProject)) {
-      setFilterProject("");
+    if (draftProject && !projects.includes(draftProject)) {
+      setDraftProject("");
       return;
     }
-    const envs = environmentOptionsFromDataset(datasetItems, filterProject);
-    if (filterEnvironment && !envs.includes(filterEnvironment)) {
-      setFilterEnvironment("");
+    const envs = environmentOptionsFromDataset(datasetItems, draftProject);
+    if (draftEnvironment && !envs.includes(draftEnvironment)) {
+      setDraftEnvironment("");
       return;
     }
-    const apps = applicationNameOptionsFromDataset(datasetItems, filterProject, filterEnvironment);
-    if (filterApplicationName && !apps.includes(filterApplicationName)) {
-      setFilterApplicationName("");
+    const apps = applicationNameOptionsFromDataset(datasetItems, draftProject, draftEnvironment);
+    if (draftApplicationName && !apps.includes(draftApplicationName)) {
+      setDraftApplicationName("");
     }
-  }, [datasetItems, filterProject, filterEnvironment, filterApplicationName]);
+  }, [datasetItems, draftProject, draftEnvironment, draftApplicationName]);
 
   const projectOptions = useMemo(() => projectOptionsFromDataset(datasetItems), [datasetItems]);
   const environmentOptions = useMemo(
-    () => environmentOptionsFromDataset(datasetItems, filterProject),
-    [datasetItems, filterProject]
+    () => environmentOptionsFromDataset(datasetItems, draftProject),
+    [datasetItems, draftProject]
   );
   const applicationNameOptions = useMemo(
-    () => applicationNameOptionsFromDataset(datasetItems, filterProject, filterEnvironment),
-    [datasetItems, filterProject, filterEnvironment]
+    () => applicationNameOptionsFromDataset(datasetItems, draftProject, draftEnvironment),
+    [datasetItems, draftProject, draftEnvironment]
   );
 
-  const filteredItems = useMemo(
-    () =>
-      applyExecutiveSummaryFilters(datasetItems, {
-        project: filterProject,
-        environment: filterEnvironment,
-        applicationName: filterApplicationName
-      }),
-    [datasetItems, filterProject, filterEnvironment, filterApplicationName]
-  );
+  const kpis = useMemo(() => computeSummaryKpis(datasetItems), [datasetItems]);
+  const byApp = useMemo(() => groupByApplication(datasetItems), [datasetItems]);
+  const byProject = useMemo(() => groupByProject(datasetItems), [datasetItems]);
+  const topFailing = useMemo(() => topFailingApplications(datasetItems), [datasetItems]);
+  const repeated = useMemo(() => repeatedFailures(datasetItems), [datasetItems]);
+  const mostActive = useMemo(() => mostActiveApplication(datasetItems), [datasetItems]);
+  const mostActiveProj = useMemo(() => mostActiveProject(datasetItems), [datasetItems]);
+  const trend = useMemo(() => failureTrend(datasetItems), [datasetItems]);
 
-  const kpis = useMemo(() => computeSummaryKpis(filteredItems), [filteredItems]);
-  const byApp = useMemo(() => groupByApplication(filteredItems), [filteredItems]);
-  const byProject = useMemo(() => groupByProject(filteredItems), [filteredItems]);
-  const topFailing = useMemo(() => topFailingApplications(filteredItems), [filteredItems]);
-  const repeated = useMemo(() => repeatedFailures(filteredItems), [filteredItems]);
-  const mostActive = useMemo(() => mostActiveApplication(filteredItems), [filteredItems]);
-  const mostActiveProj = useMemo(() => mostActiveProject(filteredItems), [filteredItems]);
-  const trend = useMemo(() => failureTrend(filteredItems), [filteredItems]);
+  const handleApplyFilters = () => {
+    void (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await fetchExecutiveSummaryDeployments({
+          from: `${draftFromDate}T00:00:00.000Z`,
+          to: `${draftToDate}T23:59:59.999Z`,
+          status: draftStatus || undefined,
+          projectName: draftProject || undefined,
+          environment: draftEnvironment || undefined,
+          applicationName: draftApplicationName || undefined
+        });
+        setDatasetItems(result.items);
+        setHasLoaded(true);
+      } catch {
+        setError("Unable to load executive summary data. Please try again.");
+        setDatasetItems([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  };
 
   useEffect(() => {
     if (loading) return;
-    logExecutiveSummaryUiFinalDataset(filteredItems);
-  }, [filteredItems, loading]);
+    logExecutiveSummaryUiFinalDataset(datasetItems);
+  }, [datasetItems, loading]);
 
   if (!checked) return null;
 
@@ -203,19 +158,22 @@ export default function SummaryPage() {
 
         <section className="panel block">
           <h2 className="block-title">Filters</h2>
-          <p className="filter-hint">Date and status apply to the loaded dataset. Project, environment, and application narrow the view using enriched names (not Jenkins job names).</p>
+          <p className="filter-hint">
+            Defaults are the previous calendar month. Adjust filters, then click <strong>Apply filters</strong> to load data.
+            Project, environment, and application use enriched names (not Jenkins job names).
+          </p>
           <div className="filters">
             <label className="field">
               <span>From date</span>
-              <input className="input" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+              <input className="input" type="date" value={draftFromDate} onChange={(e) => setDraftFromDate(e.target.value)} />
             </label>
             <label className="field">
               <span>To date</span>
-              <input className="input" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+              <input className="input" type="date" value={draftToDate} onChange={(e) => setDraftToDate(e.target.value)} />
             </label>
             <label className="field">
               <span>Status</span>
-              <select className="select" value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
+              <select className="select" value={draftStatus} onChange={(e) => setDraftStatus(e.target.value as StatusFilter)}>
                 <option value="">All</option>
                 <option value="success">Success</option>
                 <option value="failure">Failure</option>
@@ -225,11 +183,11 @@ export default function SummaryPage() {
               <span>Project</span>
               <select
                 className="select"
-                value={filterProject}
+                value={draftProject}
                 onChange={(e) => {
-                  setFilterProject(e.target.value);
-                  setFilterEnvironment("");
-                  setFilterApplicationName("");
+                  setDraftProject(e.target.value);
+                  setDraftEnvironment("");
+                  setDraftApplicationName("");
                 }}
               >
                 <option value="">All projects</option>
@@ -244,10 +202,10 @@ export default function SummaryPage() {
               <span>Environment</span>
               <select
                 className="select"
-                value={filterEnvironment}
+                value={draftEnvironment}
                 onChange={(e) => {
-                  setFilterEnvironment(e.target.value);
-                  setFilterApplicationName("");
+                  setDraftEnvironment(e.target.value);
+                  setDraftApplicationName("");
                 }}
               >
                 <option value="">All environments</option>
@@ -260,7 +218,11 @@ export default function SummaryPage() {
             </label>
             <label className="field">
               <span>Application</span>
-              <select className="select" value={filterApplicationName} onChange={(e) => setFilterApplicationName(e.target.value)}>
+              <select
+                className="select"
+                value={draftApplicationName}
+                onChange={(e) => setDraftApplicationName(e.target.value)}
+              >
                 <option value="">All applications</option>
                 {applicationNameOptions.map((a) => (
                   <option key={a} value={a}>
@@ -269,36 +231,72 @@ export default function SummaryPage() {
                 ))}
               </select>
             </label>
+            <div className="field field-apply">
+              <span className="apply-label" aria-hidden="true">
+                &nbsp;
+              </span>
+              <button type="button" className="btn btn-primary" onClick={handleApplyFilters} disabled={loading}>
+                {loading ? "Loading…" : "Apply filters"}
+              </button>
+            </div>
           </div>
         </section>
 
         {loading ? <p className="state state-loading">Loading summary…</p> : null}
         {error ? <p className="state state-error">{error}</p> : null}
-        {!loading && !error && datasetItems.length === 0 ? (
-          <p className="state state-empty">No deployment data available for the selected date range and status.</p>
+        {!loading && !error && !hasLoaded ? (
+          <p className="state state-empty">Click &quot;Apply filters&quot; to load deployment data for the selected range.</p>
         ) : null}
-        {!loading && !error && datasetItems.length > 0 && filteredItems.length === 0 ? (
-          <p className="state state-empty">No rows match the selected project, environment, and application filters.</p>
+        {!loading && !error && hasLoaded && datasetItems.length === 0 ? (
+          <p className="state state-empty">No deployment data available for the selected filters.</p>
         ) : null}
 
+        {hasLoaded ? (
+          <>
         <section className="metrics">
-          <div className="panel metric"><div className="metric-label">Total deployments</div><div className="metric-value">{kpis.totalDeployments}</div></div>
-          <div className="panel metric"><div className="metric-label">Success count</div><div className="metric-value success">{kpis.successCount}</div></div>
-          <div className="panel metric"><div className="metric-label">Failure count</div><div className="metric-value failure">{kpis.failureCount}</div></div>
-          <div className="panel metric"><div className="metric-label">Success rate</div><div className="metric-value">{kpis.successRate}%</div></div>
+          <div className="panel metric">
+            <div className="metric-label">Total deployments</div>
+            <div className="metric-value">{kpis.totalDeployments}</div>
+          </div>
+          <div className="panel metric">
+            <div className="metric-label">Success count</div>
+            <div className="metric-value success">{kpis.successCount}</div>
+          </div>
+          <div className="panel metric">
+            <div className="metric-label">Failure count</div>
+            <div className="metric-value failure">{kpis.failureCount}</div>
+          </div>
+          <div className="panel metric">
+            <div className="metric-label">Success rate</div>
+            <div className="metric-value">{kpis.successRate}%</div>
+          </div>
         </section>
 
         <section className="panel block">
           <h2 className="block-title">Attention Required</h2>
           <div className="rows">
             <div className="row-title">Top failing applications (app + environment, Top 3)</div>
-            {topFailing.length === 0 ? <div className="row muted">No failing applications in current filter scope.</div> : topFailing.map((x) => (
-              <div key={x.application} className="row"><span>{x.application}</span><strong>{x.failures} failures</strong></div>
-            ))}
+            {topFailing.length === 0 ? (
+              <div className="row muted">No failing applications in current filter scope.</div>
+            ) : (
+              topFailing.map((x) => (
+                <div key={x.application} className="row">
+                  <span>{x.application}</span>
+                  <strong>{x.failures} failures</strong>
+                </div>
+              ))
+            )}
             <div className="row-title">Repeated failures</div>
-            {repeated.length === 0 ? <div className="row muted">No repeated failures detected.</div> : repeated.map((x) => (
-              <div key={`rep-${x.application}`} className="row"><span>{x.application}</span><strong>{x.failures} failures</strong></div>
-            ))}
+            {repeated.length === 0 ? (
+              <div className="row muted">No repeated failures detected.</div>
+            ) : (
+              repeated.map((x) => (
+                <div key={`rep-${x.application}`} className="row">
+                  <span>{x.application}</span>
+                  <strong>{x.failures} failures</strong>
+                </div>
+              ))
+            )}
           </div>
         </section>
 
@@ -307,7 +305,12 @@ export default function SummaryPage() {
           <p className="section-hint">Each row is application and environment (e.g. Reporting Tool — prod).</p>
           <div className="rows">
             {byApp.map((x) => (
-              <div key={x.application} className="row"><span>{x.application}</span><span>Total: {x.total} | Failures: {x.failures}</span></div>
+              <div key={x.application} className="row">
+                <span>{x.application}</span>
+                <span>
+                  Total: {x.total} | Failures: {x.failures}
+                </span>
+              </div>
             ))}
           </div>
         </section>
@@ -316,7 +319,12 @@ export default function SummaryPage() {
           <h2 className="block-title">Breakdown by Project</h2>
           <div className="rows">
             {byProject.map((x) => (
-              <div key={x.project} className="row"><span>{x.project}</span><span>Total: {x.total} | Failures: {x.failures}</span></div>
+              <div key={x.project} className="row">
+                <span>{x.project}</span>
+                <span>
+                  Total: {x.total} | Failures: {x.failures}
+                </span>
+              </div>
             ))}
           </div>
         </section>
@@ -324,17 +332,42 @@ export default function SummaryPage() {
         <section className="panel block">
           <h2 className="block-title">Insights</h2>
           <ul className="insights">
-            <li>Most active application: <strong>{mostActive ? `${mostActive.application} (${mostActive.count})` : "N/A"}</strong></li>
-            <li>Most active project: <strong>{mostActiveProj ? `${mostActiveProj.project} (${mostActiveProj.count})` : "N/A"}</strong></li>
-            <li>Top failing application: <strong>{topFailing[0] ? `${topFailing[0].application} (${topFailing[0].failures} failures)` : "N/A"}</strong></li>
-            <li>Failure trend vs previous period: <strong>{trend}</strong></li>
+            <li>
+              Most active application:{" "}
+              <strong>{mostActive ? `${mostActive.application} (${mostActive.count})` : "N/A"}</strong>
+            </li>
+            <li>
+              Most active project: <strong>{mostActiveProj ? `${mostActiveProj.project} (${mostActiveProj.count})` : "N/A"}</strong>
+            </li>
+            <li>
+              Top failing application:{" "}
+              <strong>
+                {topFailing[0] ? `${topFailing[0].application} (${topFailing[0].failures} failures)` : "N/A"}
+              </strong>
+            </li>
+            <li>
+              Failure trend vs previous period: <strong>{trend}</strong>
+            </li>
           </ul>
         </section>
+          </>
+        ) : null}
       </main>
 
       <style jsx>{`
-        .page { width: min(1160px, 100%); margin: 32px auto; padding: 0 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-        .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 24px; }
+        .page {
+          width: min(1160px, 100%);
+          margin: 32px auto;
+          padding: 0 16px;
+          font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        }
+        .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 24px;
+        }
         .header-actions {
           display: flex;
           align-items: center;
@@ -343,16 +376,75 @@ export default function SummaryPage() {
           gap: 10px;
           margin-left: auto;
         }
-        .title { margin: 0 0 4px; font-size: 28px; line-height: 1.2; color: #101828; }
-        .subtitle { margin: 0; color: #667085; font-size: 14px; }
-        .panel { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; }
-        .block { padding: 16px; margin-bottom: 24px; }
-        .block-title { margin: 0 0 14px; font-size: 16px; color: #101828; }
-        .filter-hint { margin: 0 0 14px; font-size: 13px; color: #667085; line-height: 1.45; }
-        .section-hint { margin: -8px 0 12px; font-size: 13px; color: #667085; }
-        .filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; width: 100%; }
-        .field { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: #475467; min-width: 0; }
-        .input, .select { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid #d0d5dd; border-radius: 10px; padding: 9px 10px; font-size: 14px; background: #fff; }
+        .title {
+          margin: 0 0 4px;
+          font-size: 28px;
+          line-height: 1.2;
+          color: #101828;
+        }
+        .subtitle {
+          margin: 0;
+          color: #667085;
+          font-size: 14px;
+        }
+        .panel {
+          background: #fff;
+          border: 1px solid #e4e7ec;
+          border-radius: 12px;
+        }
+        .block {
+          padding: 16px;
+          margin-bottom: 24px;
+        }
+        .block-title {
+          margin: 0 0 14px;
+          font-size: 16px;
+          color: #101828;
+        }
+        .filter-hint {
+          margin: 0 0 14px;
+          font-size: 13px;
+          color: #667085;
+          line-height: 1.45;
+        }
+        .section-hint {
+          margin: -8px 0 12px;
+          font-size: 13px;
+          color: #667085;
+        }
+        .filters {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 16px;
+          width: 100%;
+          align-items: end;
+        }
+        .field {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          font-size: 13px;
+          color: #475467;
+          min-width: 0;
+        }
+        .field-apply {
+          justify-content: flex-end;
+        }
+        .apply-label {
+          visibility: hidden;
+          min-height: 1em;
+        }
+        .input,
+        .select {
+          width: 100%;
+          min-width: 0;
+          box-sizing: border-box;
+          border: 1px solid #d0d5dd;
+          border-radius: 10px;
+          padding: 9px 10px;
+          font-size: 14px;
+          background: #fff;
+        }
         .btn {
           border: 0;
           border-radius: 10px;
@@ -362,6 +454,17 @@ export default function SummaryPage() {
           line-height: 1.2;
           cursor: pointer;
           transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+        .btn-primary {
+          background: #111827;
+          color: #fff;
+        }
+        .btn-primary:hover:not(:disabled) {
+          background: #0f172a;
+        }
+        .btn-primary:disabled {
+          opacity: 0.65;
+          cursor: not-allowed;
         }
         .btn-secondary {
           background: #fff;
@@ -376,24 +479,95 @@ export default function SummaryPage() {
           outline: 2px solid #2563eb;
           outline-offset: 2px;
         }
-        .state { border-radius: 10px; padding: 12px 14px; font-size: 14px; margin-bottom: 16px; }
-        .state-loading { background: #eef4ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
-        .state-empty { background: #f8fafc; color: #475467; border: 1px solid #e4e7ec; }
-        .state-error { background: #fef3f2; color: #b42318; border: 1px solid #fecdca; }
-        .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }
-        .metric { padding: 14px; }
-        .metric-label { color: #475467; font-size: 13px; margin-bottom: 8px; }
-        .metric-value { font-size: 28px; font-weight: 700; line-height: 1.1; color: #101828; }
-        .metric-value.success { color: #166534; }
-        .metric-value.failure { color: #b42318; }
-        .rows { display: grid; gap: 8px; }
-        .row { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid #f2f4f7; font-size: 14px; }
-        .row-title { font-weight: 600; color: #344054; margin-top: 4px; }
-        .muted { color: #667085; }
-        .insights { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
-        @media (max-width: 1100px) { .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-        @media (max-width: 900px) { .header { flex-direction: column; align-items: flex-start; } }
-        @media (max-width: 640px) { .filters { grid-template-columns: 1fr; } }
+        .state {
+          border-radius: 10px;
+          padding: 12px 14px;
+          font-size: 14px;
+          margin-bottom: 16px;
+        }
+        .state-loading {
+          background: #eef4ff;
+          color: #1d4ed8;
+          border: 1px solid #bfdbfe;
+        }
+        .state-empty {
+          background: #f8fafc;
+          color: #475467;
+          border: 1px solid #e4e7ec;
+        }
+        .state-error {
+          background: #fef3f2;
+          color: #b42318;
+          border: 1px solid #fecdca;
+        }
+        .metrics {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 16px;
+          margin-bottom: 24px;
+        }
+        .metric {
+          padding: 14px;
+        }
+        .metric-label {
+          color: #475467;
+          font-size: 13px;
+          margin-bottom: 8px;
+        }
+        .metric-value {
+          font-size: 28px;
+          font-weight: 700;
+          line-height: 1.1;
+          color: #101828;
+        }
+        .metric-value.success {
+          color: #166534;
+        }
+        .metric-value.failure {
+          color: #b42318;
+        }
+        .rows {
+          display: grid;
+          gap: 8px;
+        }
+        .row {
+          display: flex;
+          justify-content: space-between;
+          gap: 10px;
+          padding: 8px 0;
+          border-bottom: 1px solid #f2f4f7;
+          font-size: 14px;
+        }
+        .row-title {
+          font-weight: 600;
+          color: #344054;
+          margin-top: 4px;
+        }
+        .muted {
+          color: #667085;
+        }
+        .insights {
+          margin: 0;
+          padding-left: 20px;
+          display: grid;
+          gap: 8px;
+        }
+        @media (max-width: 1100px) {
+          .filters {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+        }
+        @media (max-width: 900px) {
+          .header {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+        }
+        @media (max-width: 640px) {
+          .filters {
+            grid-template-columns: 1fr;
+          }
+        }
       `}</style>
     </>
   );

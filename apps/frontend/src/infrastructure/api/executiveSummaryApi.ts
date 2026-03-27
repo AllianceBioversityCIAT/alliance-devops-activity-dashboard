@@ -2,7 +2,6 @@ import type { ExecutiveSummaryDeployment } from "@domain/ExecutiveSummaryDeploym
 import { getIdToken } from "../auth/CognitoClient";
 import { getEnv } from "../config/env";
 import { ApiClient } from "./ApiClient";
-import type { DeploymentFilters } from "./deploymentsApi";
 import { normalizeExecutiveSummaryDeployment } from "./normalizeExecutiveSummaryDeployment";
 
 export type ExecutiveSummaryDeploymentsResponse = {
@@ -10,10 +9,19 @@ export type ExecutiveSummaryDeploymentsResponse = {
   pageInfo: { page: number; pageSize: number; total?: number };
 };
 
+/** Filters sent only when the user applies them (single request, no pagination). */
+export type ExecutiveSummaryRequestFilters = {
+  from: string;
+  to: string;
+  status?: "success" | "failure";
+  projectName?: string;
+  environment?: string;
+  applicationName?: string;
+  job?: string;
+};
+
 export async function fetchExecutiveSummaryDeployments(
-  filters: DeploymentFilters,
-  page: number,
-  pageSize: number
+  filters: ExecutiveSummaryRequestFilters
 ): Promise<ExecutiveSummaryDeploymentsResponse> {
   const token = await getIdToken();
   if (!token) {
@@ -21,19 +29,23 @@ export async function fetchExecutiveSummaryDeployments(
   }
 
   const query = new URLSearchParams();
-  if (filters.from) query.set("from", filters.from);
-  if (filters.to) query.set("to", filters.to);
-  if (filters.application) query.set("application", filters.application);
+  query.set("from", filters.from);
+  query.set("to", filters.to);
   if (filters.status) query.set("status", filters.status);
-  query.set("page", String(page));
-  query.set("pageSize", String(pageSize));
+  if (filters.projectName) query.set("projectName", filters.projectName);
+  if (filters.environment) query.set("environment", filters.environment);
+  if (filters.applicationName) query.set("applicationName", filters.applicationName);
+  if (filters.job) query.set("job", filters.job);
 
   const client = new ApiClient(getEnv().apiBaseUrl);
-  const raw = await client.get<ExecutiveSummaryDeploymentsResponse>(`/api/executive-summary/deployments?${query.toString()}`, {
-    headers: {
-      Authorization: `Bearer ${token}`
+  const raw = await client.get<ExecutiveSummaryDeploymentsResponse>(
+    `/api/executive-summary/deployments?${query.toString()}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
     }
-  });
+  );
   return {
     pageInfo: raw.pageInfo,
     items: raw.items.map((item) => normalizeExecutiveSummaryDeployment(item))

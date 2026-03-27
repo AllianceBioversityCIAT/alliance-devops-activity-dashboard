@@ -29,8 +29,6 @@ export function enrichDeploymentExecution(
   const jobName = d.application;
   const envOrUnknown = deploymentEnvironmentOrUnknown(d);
 
-  console.log("metadata", metadata);
-
   if (metadata) {
     const metaEnv = metadata.environment?.trim();
     const resolvedEnv = metaEnv && metaEnv.length > 0 ? metaEnv : envOrUnknown;

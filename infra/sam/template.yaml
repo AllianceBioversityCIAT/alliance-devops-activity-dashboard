@@ -119,10 +119,14 @@ Resources:
             - Effect: Allow
               Action:
                 - dynamodb:Scan
+                - dynamodb:Query
                 - dynamodb:DescribeTable
-              Resource: !Sub "arn:aws:dynamodb:${AwsRegion}:${AWS::AccountId}:table/${DynamoDbTableName}"
+              Resource:
+                - !Sub "arn:aws:dynamodb:${AwsRegion}:${AWS::AccountId}:table/${DynamoDbTableName}"
+                - !Sub "arn:aws:dynamodb:${AwsRegion}:${AWS::AccountId}:table/${DynamoDbTableName}/index/*"
             - Effect: Allow
               Action:
+                - dynamodb:Scan
                 - dynamodb:Query
                 - dynamodb:DescribeTable
               Resource: !Sub "arn:aws:dynamodb:${AwsRegion}:${AWS::AccountId}:table/${DeploymentMetadataTableName}"
