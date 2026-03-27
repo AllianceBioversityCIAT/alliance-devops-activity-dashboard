@@ -1,30 +1,43 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, ScanCommand, ScanCommandInput } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, QueryCommand, type QueryCommandInput } from "@aws-sdk/lib-dynamodb";
 import { getConfig } from "../config/env.js";
 import {
   DeploymentRepository,
-  DeploymentsSortBy,
   ListDeploymentsFilters,
-  ListDeploymentsListOptions,
-  ListDeploymentsPage,
-  ListDeploymentsResult
+  ListDeploymentsQueryPage,
+  ListDeploymentsQueryResult
 } from "../../domain/ports/DeploymentRepository.js";
 import { DeploymentExecution } from "../../domain/DeploymentExecution.js";
+import type { DeploymentMetadataRepository } from "../../domain/ports/DeploymentMetadataRepository.js";
+import {
+  dashboardFiltersHash,
+  dashboardJobsHash,
+  decodeDashboardCursor,
+  encodeDashboardCursor,
+  type DashboardCursorPayload
+} from "./dashboardDeploymentCursor.js";
+import { mapDynamoItemToDeploymentExecution } from "./mapDeploymentExecutionItem.js";
 
-// MVP note:
-// We use a scan-based approach with optional FilterExpression due to unknown key design.
-// A single Scan with Limit only evaluates that many table items; FilterExpression does not
-// reduce scanned items. We paginate with LastEvaluatedKey so date/job filters see all rows.
-// Optional maxScannedItems (dashboard) caps total evaluated items; omit for full-table scan (Executive Summary).
-const SCAN_PAGE_ITEM_LIMIT = 1000;
-
+/**
+ * Dashboard deployments: Query-only on the job+buildDate GSI (EXEC_SUMMARY_JOB_GSI_NAME / PK / SK env).
+ *
+ * With `application` filter: single-partition Query + DynamoDB LastEvaluatedKey cursor.
+ * Without it: job names from deployment_metadata (Scan on small metadata table), then k-way merge by
+ * `buildDate` with a cursor that stores per-job ExclusiveStartKey. Executions whose job is not in metadata
+ * are not included in the "all jobs" view (aligns with Executive Summary job_gsi).
+ *
+ * Global ordering for pagination is always buildDate (execution time) per sortOrder; other table columns
+ * are not indexed for server-side re-sorts (see `sortWarning` on API responses).
+ */
 export class DynamoDeploymentRepository implements DeploymentRepository {
   private readonly doc: DynamoDBDocumentClient;
   private readonly tableName: string;
+  private readonly metadata: DeploymentMetadataRepository;
 
-  constructor() {
+  constructor(metadata: DeploymentMetadataRepository) {
     const { awsRegion, awsAccessKeyId, awsSecretAccessKey, dynamoTableName } = getConfig();
     this.tableName = dynamoTableName;
+    this.metadata = metadata;
     const client = new DynamoDBClient({
       region: awsRegion,
       credentials: {
@@ -35,166 +48,377 @@ export class DynamoDeploymentRepository implements DeploymentRepository {
     this.doc = DynamoDBDocumentClient.from(client);
   }
 
-  async list(
-    filters: ListDeploymentsFilters,
-    page: ListDeploymentsPage,
-    options?: ListDeploymentsListOptions
-  ): Promise<ListDeploymentsResult> {
-    const maxScannedItems = options?.maxScannedItems;
-    // Build FilterExpression over attributes: buildDate, job, result
-    const exprs: string[] = [];
-    const names: Record<string, string> = {};
-    const values: Record<string, any> = {};
-
-    if (filters.from) {
-      exprs.push("#buildDate >= :from");
-      names["#buildDate"] = "buildDate";
-      values[":from"] = filters.from;
-    }
-    if (filters.to) {
-      exprs.push("#buildDate <= :to");
-      names["#buildDate"] = "buildDate";
-      values[":to"] = filters.to;
-    }
-    if (filters.application) {
-      exprs.push("#job = :job");
-      names["#job"] = "job";
-      values[":job"] = filters.application;
-    }
-    if (filters.status) {
-      // Dynamo raw 'result' likely 'SUCCESS'/'FAILURE' etc.
-      // We'll match case-insensitively by normalizing known values; for filter we assume upper-case in table.
-      const wanted = filters.status.toUpperCase();
-      exprs.push("#result = :result");
-      names["#result"] = "result";
-      values[":result"] = wanted;
+  async list(filters: ListDeploymentsFilters, page: ListDeploymentsQueryPage): Promise<ListDeploymentsQueryResult> {
+    const cfg = getConfig();
+    const indexName = cfg.execSummaryJobGsiName?.trim();
+    if (!indexName) {
+      throw new Error(
+        "Dashboard requires EXEC_SUMMARY_JOB_GSI_NAME (job+buildDate GSI) for Query-based pagination."
+      );
     }
 
-    const baseInput: ScanCommandInput = {
-      TableName: this.tableName,
-      Limit: SCAN_PAGE_ITEM_LIMIT
-    };
-    if (exprs.length > 0) {
-      baseInput.FilterExpression = exprs.join(" AND ");
-      baseInput.ExpressionAttributeNames = names;
-      baseInput.ExpressionAttributeValues = values;
-    }
-
-    const rawItems: Record<string, unknown>[] = [];
-    let exclusiveStartKey: Record<string, unknown> | undefined;
-    let totalScanned = 0;
-
-    do {
-      const input: ScanCommandInput = { ...baseInput };
-      if (exclusiveStartKey) {
-        input.ExclusiveStartKey = exclusiveStartKey;
-      }
-      const scanResp = await this.doc.send(new ScanCommand(input));
-      const pageItems = scanResp.Items ?? [];
-      rawItems.push(...pageItems);
-      const scannedThisPage = scanResp.ScannedCount ?? SCAN_PAGE_ITEM_LIMIT;
-      totalScanned += scannedThisPage;
-      exclusiveStartKey = scanResp.LastEvaluatedKey as Record<string, unknown> | undefined;
-
-      if (maxScannedItems != null && totalScanned >= maxScannedItems) {
-        if (exclusiveStartKey) {
-          console.warn(
-            `[DynamoDeploymentRepository] Scan stopped after ${maxScannedItems} items evaluated; table may have more rows.`
-          );
-        }
-        break;
-      }
-    } while (exclusiveStartKey);
-
-    const items = rawItems.map(mapRecordToDomain);
-
-    const sortBy = filters.sortBy ?? "executedAt";
+    const pkAttr = cfg.execSummaryJobGsiPk.trim();
+    const skAttr = cfg.execSummaryJobGsiSk.trim();
+    const limit = page.limit > 0 && page.limit <= 100 ? page.limit : 10;
     const sortOrder = filters.sortOrder ?? "desc";
-    const sorted = sortDeployments(items, sortBy, sortOrder);
 
-    const start = (page.page - 1) * page.pageSize;
-    const paged = sorted.slice(start, start + page.pageSize);
+    const from = filters.from?.trim();
+    const to = filters.to?.trim();
+    if (!from || !to) {
+      return {
+        items: [],
+        nextCursor: null,
+        hasNextPage: false,
+        effectiveSortBy: "executedAt",
+        sortWarning: undefined
+      };
+    }
+
+    const fh = dashboardFiltersHash({
+      from,
+      to,
+      application: filters.application,
+      status: filters.status
+    });
+
+    const application = filters.application?.trim();
+    if (application) {
+      return this.listSingleJob({
+        indexName,
+        pkAttr,
+        skAttr,
+        job: application,
+        from,
+        to,
+        status: filters.status,
+        limit,
+        sortOrder,
+        cursor: page.cursor,
+        fh
+      });
+    }
+
+    return this.listMergedJobs({
+      indexName,
+      pkAttr,
+      skAttr,
+      from,
+      to,
+      status: filters.status,
+      limit,
+      sortOrder,
+      cursor: page.cursor,
+      fh
+    });
+  }
+
+  private async listSingleJob(params: {
+    indexName: string;
+    pkAttr: string;
+    skAttr: string;
+    job: string;
+    from: string;
+    to: string;
+    status?: ListDeploymentsFilters["status"];
+    limit: number;
+    sortOrder: "asc" | "desc";
+    cursor?: string;
+    fh: string;
+  }): Promise<ListDeploymentsQueryResult> {
+    const decoded = params.cursor ? decodeDashboardCursor(params.cursor) : null;
+    let lek: Record<string, unknown> | null | undefined;
+    if (decoded) {
+      if (decoded.mode !== "single" || decoded.job !== params.job || decoded.fh !== params.fh) {
+        lek = undefined;
+      } else {
+        lek = decoded.lek;
+      }
+    }
+
+    const { items, lastKey } = await this.queryJobPageSequential({
+      indexName: params.indexName,
+      pkAttr: params.pkAttr,
+      skAttr: params.skAttr,
+      job: params.job,
+      from: params.from,
+      to: params.to,
+      status: params.status,
+      limit: params.limit,
+      sortOrder: params.sortOrder,
+      exclusiveStartKey: lek ?? undefined
+    });
+
+    const payload: DashboardCursorPayload = {
+      v: 1,
+      mode: "single",
+      job: params.job,
+      lek: lastKey,
+      fh: params.fh
+    };
 
     return {
-      items: paged,
-      total: sorted.length
+      items,
+      nextCursor: lastKey ? encodeDashboardCursor(payload) : null,
+      hasNextPage: lastKey != null,
+      effectiveSortBy: "executedAt",
+      sortWarning: undefined
     };
+  }
+
+  private async listMergedJobs(params: {
+    indexName: string;
+    pkAttr: string;
+    skAttr: string;
+    from: string;
+    to: string;
+    status?: ListDeploymentsFilters["status"];
+    limit: number;
+    sortOrder: "asc" | "desc";
+    cursor?: string;
+    fh: string;
+  }): Promise<ListDeploymentsQueryResult> {
+    const jobs = await this.metadata.listJobNamesForFilters({});
+    const jobsSorted = [...jobs].sort((a, b) => a.localeCompare(b));
+    const jh = dashboardJobsHash(jobsSorted);
+
+    if (jobsSorted.length === 0) {
+      return {
+        items: [],
+        nextCursor: null,
+        hasNextPage: false,
+        effectiveSortBy: "executedAt",
+        sortWarning: undefined
+      };
+    }
+
+    const decoded = params.cursor ? decodeDashboardCursor(params.cursor) : null;
+    const keyState = new Map<string, Record<string, unknown> | null | undefined>();
+    for (const j of jobsSorted) {
+      if (!decoded || decoded.mode !== "merge" || decoded.fh !== params.fh || decoded.jh !== jh) {
+        keyState.set(j, undefined);
+      } else {
+        const v = decoded.lekByJob[j];
+        if (v === undefined || !(j in decoded.lekByJob)) {
+          keyState.set(j, undefined);
+        } else {
+          keyState.set(j, v);
+        }
+      }
+    }
+
+    type HeapEntry = { job: string; item: DeploymentExecution };
+    const heap: HeapEntry[] = [];
+    const concurrency = getConfig().execSummaryJobQueryConcurrency;
+
+    for (let i = 0; i < jobsSorted.length; i += concurrency) {
+      const chunk = jobsSorted.slice(i, i + concurrency);
+      await Promise.all(
+        chunk.map(async (job) => {
+          const item = await this.queryOneForMerge({
+            indexName: params.indexName,
+            pkAttr: params.pkAttr,
+            skAttr: params.skAttr,
+            job,
+            from: params.from,
+            to: params.to,
+            status: params.status,
+            sortOrder: params.sortOrder,
+            keyState
+          });
+          if (item) heap.push({ job, item });
+        })
+      );
+    }
+
+    const result: DeploymentExecution[] = [];
+    while (result.length < params.limit && heap.length > 0) {
+      const idx = pickHeapIndex(heap, params.sortOrder);
+      const chosen = heap[idx];
+      heap.splice(idx, 1);
+      result.push(chosen.item);
+
+      const item = await this.queryOneForMerge({
+        indexName: params.indexName,
+        pkAttr: params.pkAttr,
+        skAttr: params.skAttr,
+        job: chosen.job,
+        from: params.from,
+        to: params.to,
+        status: params.status,
+        sortOrder: params.sortOrder,
+        keyState
+      });
+      if (item) heap.push({ job: chosen.job, item });
+    }
+
+    const hasNextPage = heap.length > 0;
+    /** Every job key avoids decode treating missing partitions as “from start” (would duplicate rows). */
+    const lekByJob: Record<string, Record<string, unknown> | null> = {};
+    for (const j of jobsSorted) {
+      const s = keyState.get(j);
+      if (s === undefined || s === null) lekByJob[j] = null;
+      else lekByJob[j] = s;
+    }
+
+    const nextPayload: DashboardCursorPayload = {
+      v: 1,
+      mode: "merge",
+      lekByJob,
+      fh: params.fh,
+      jh
+    };
+
+    return {
+      items: result,
+      nextCursor: hasNextPage ? encodeDashboardCursor(nextPayload) : null,
+      hasNextPage,
+      effectiveSortBy: "executedAt",
+      sortWarning: undefined
+    };
+  }
+
+  /**
+   * Sequential 1-item reads per Query when status filter is used (FilterExpression can skip index entries).
+   * Without status, uses larger Limits to reduce round-trips.
+   */
+  private async queryJobPageSequential(opts: {
+    indexName: string;
+    pkAttr: string;
+    skAttr: string;
+    job: string;
+    from: string;
+    to: string;
+    status?: ListDeploymentsFilters["status"];
+    limit: number;
+    sortOrder: "asc" | "desc";
+    exclusiveStartKey?: Record<string, unknown>;
+  }): Promise<{ items: DeploymentExecution[]; lastKey: Record<string, unknown> | null }> {
+    const names: Record<string, string> = {
+      "#pk": opts.pkAttr,
+      "#sk": opts.skAttr
+    };
+    const values: Record<string, unknown> = {
+      ":j": opts.job,
+      ":from": opts.from,
+      ":to": opts.to
+    };
+    let filterExpr: string | undefined;
+    if (opts.status) {
+      names["#result"] = "result";
+      values[":result"] = opts.status.toUpperCase();
+      filterExpr = "#result = :result";
+    }
+
+    const items: DeploymentExecution[] = [];
+    let exclusiveStartKey: Record<string, unknown> | undefined = opts.exclusiveStartKey;
+    let nextPageKey: Record<string, unknown> | null = null;
+    const useSmallChunks = Boolean(opts.status);
+
+    while (items.length < opts.limit) {
+      const chunk = useSmallChunks ? 1 : opts.limit - items.length;
+      const input: QueryCommandInput = {
+        TableName: this.tableName,
+        IndexName: opts.indexName,
+        KeyConditionExpression: "#pk = :j AND #sk BETWEEN :from AND :to",
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ScanIndexForward: opts.sortOrder === "asc",
+        Limit: chunk,
+        ...(filterExpr ? { FilterExpression: filterExpr } : {}),
+        ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {})
+      };
+      const resp = await this.doc.send(new QueryCommand(input));
+      const lek = resp.LastEvaluatedKey as Record<string, unknown> | undefined;
+      for (const it of resp.Items ?? []) {
+        items.push(mapDynamoItemToDeploymentExecution(it as Record<string, unknown>));
+        if (items.length >= opts.limit) {
+          nextPageKey = lek ?? null;
+          break;
+        }
+      }
+      if (items.length >= opts.limit) break;
+      if (!lek) {
+        nextPageKey = null;
+        break;
+      }
+      exclusiveStartKey = lek;
+      if ((resp.Items ?? []).length === 0) continue;
+    }
+
+    if (items.length < opts.limit) nextPageKey = null;
+    return { items, lastKey: nextPageKey };
+  }
+
+  /** One item for merge path; updates `keyState` for `job`. */
+  private async queryOneForMerge(opts: {
+    indexName: string;
+    pkAttr: string;
+    skAttr: string;
+    job: string;
+    from: string;
+    to: string;
+    status?: ListDeploymentsFilters["status"];
+    sortOrder: "asc" | "desc";
+    keyState: Map<string, Record<string, unknown> | null | undefined>;
+  }): Promise<DeploymentExecution | null> {
+    const st = opts.keyState.get(opts.job);
+    if (st === null) return null;
+
+    const names: Record<string, string> = {
+      "#pk": opts.pkAttr,
+      "#sk": opts.skAttr
+    };
+    const values: Record<string, unknown> = {
+      ":j": opts.job,
+      ":from": opts.from,
+      ":to": opts.to
+    };
+    let filterExpr: string | undefined;
+    if (opts.status) {
+      names["#result"] = "result";
+      values[":result"] = opts.status.toUpperCase();
+      filterExpr = "#result = :result";
+    }
+
+    let exclusiveStartKey: Record<string, unknown> | undefined =
+      st === undefined ? undefined : (st as Record<string, unknown>);
+
+    while (true) {
+      const input: QueryCommandInput = {
+        TableName: this.tableName,
+        IndexName: opts.indexName,
+        KeyConditionExpression: "#pk = :j AND #sk BETWEEN :from AND :to",
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ScanIndexForward: opts.sortOrder === "asc",
+        Limit: 1,
+        ...(filterExpr ? { FilterExpression: filterExpr } : {}),
+        ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {})
+      };
+      const resp = await this.doc.send(new QueryCommand(input));
+      const lekNext = resp.LastEvaluatedKey as Record<string, unknown> | undefined;
+      const raw = resp.Items?.[0];
+      if (!raw) {
+        opts.keyState.set(opts.job, null);
+        return null;
+      }
+      opts.keyState.set(opts.job, lekNext ?? null);
+      return mapDynamoItemToDeploymentExecution(raw as Record<string, unknown>);
+    }
   }
 }
 
-function sortDeployments(items: DeploymentExecution[], sortBy: DeploymentsSortBy, order: "asc" | "desc"): DeploymentExecution[] {
-  const dir = order === "asc" ? 1 : -1;
-  return [...items].sort((a, b) => {
-    if (sortBy === "buildNumber") {
-      return compareBuildNumber(a, b, order);
+function pickHeapIndex(heap: Array<{ item: DeploymentExecution }>, sortOrder: "asc" | "desc"): number {
+  let best = 0;
+  for (let i = 1; i < heap.length; i++) {
+    const a = heap[best].item;
+    const b = heap[i].item;
+    const cd = (a.executedAt || "").localeCompare(b.executedAt || "");
+    if (sortOrder === "desc") {
+      if (cd < 0 || (cd === 0 && (a.id || "").localeCompare(b.id || "") < 0)) best = i;
+    } else {
+      if (cd > 0 || (cd === 0 && (a.id || "").localeCompare(b.id || "") > 0)) best = i;
     }
-    let c = 0;
-    switch (sortBy) {
-      case "executedAt": {
-        const va = a.executedAt || "";
-        const vb = b.executedAt || "";
-        c = va.localeCompare(vb);
-        break;
-      }
-      case "application":
-        c = (a.application || "").localeCompare(b.application || "");
-        break;
-      case "status":
-        c = statusSortRank(a.status) - statusSortRank(b.status);
-        break;
-      case "executedBy":
-        c = (a.executedBy || "").localeCompare(b.executedBy || "");
-        break;
-      case "stage":
-        c = (a.stage || "").localeCompare(b.stage || "");
-        break;
-      default:
-        c = 0;
-    }
-    if (c !== 0) return dir * c;
-    return (a.id || "").localeCompare(b.id || "");
-  });
-}
-
-/** Null / missing build numbers sort last in both directions. */
-function compareBuildNumber(a: DeploymentExecution, b: DeploymentExecution, order: "asc" | "desc"): number {
-  const na = a.buildNumber;
-  const nb = b.buildNumber;
-  if (na == null && nb == null) return (a.id || "").localeCompare(b.id || "");
-  if (na == null) return 1;
-  if (nb == null) return -1;
-  const d = na - nb;
-  if (d !== 0) return order === "asc" ? d : -d;
-  return (a.id || "").localeCompare(b.id || "");
-}
-
-/** success > failure > unknown (lower rank first when ascending). */
-function statusSortRank(s: DeploymentExecution["status"]): number {
-  if (s === "success") return 0;
-  if (s === "failure") return 1;
-  return 2;
-}
-
-function normalizeStatus(raw?: string | null): "success" | "failure" | "unknown" {
-  const val = (raw ?? "").toString().toLowerCase();
-  if (val === "success") return "success";
-  if (val === "failure") return "failure";
-  return "unknown";
-}
-
-function mapRecordToDomain(item: Record<string, any>): DeploymentExecution {
-  // Raw spec fields:
-  // id, buildDate, buildNumber, commitHash?, commitMessage?, commitUser?, exception?, job, result, stage?, url?
-  return {
-    id: String(item.id ?? ""),
-    application: String(item.job ?? ""),
-    environment: item.environment != null && String(item.environment).trim() !== "" ? String(item.environment).trim() : undefined,
-    executedAt: String(item.buildDate ?? ""),
-    buildNumber: typeof item.buildNumber === "number" ? item.buildNumber : Number(item.buildNumber) || undefined,
-    status: normalizeStatus(item.result),
-    executedBy: item.commitUser ? String(item.commitUser) : undefined,
-    stage: item.stage ? String(item.stage) : undefined,
-    pipelineUrl: item.url ? String(item.url) : undefined,
-    errorMessage: item.exception ? String(item.exception) : undefined
-  };
+  }
+  return best;
 }

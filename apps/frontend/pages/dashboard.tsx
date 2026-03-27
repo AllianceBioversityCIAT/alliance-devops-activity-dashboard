@@ -1,5 +1,5 @@
 import Head from "next/head";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { isAuthenticated, signOut } from "../src/infrastructure/auth/CognitoClient";
 import { useRouter } from "next/router";
 import { Deployment } from "@domain/Deployment";
@@ -30,17 +30,37 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<Deployment[]>([]);
-  const [total, setTotal] = useState<number | undefined>(undefined);
 
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [application, setApplication] = useState("");
   const [status, setStatus] = useState<"" | "success" | "failure">("");
 
-  const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [sortBy, setSortBy] = useState<DeploymentsSortBy>("executedAt");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+
+  /** Server uses DynamoDB GSI order (execution time). Cursor paginates that stream; stack replays “previous”. */
+  const filterKey = useMemo(
+    () => [fromDate, toDate, application, status, pageSize, sortBy, sortOrder].join("|"),
+    [fromDate, toDate, application, status, pageSize, sortBy, sortOrder]
+  );
+
+  const [listPaging, setListPaging] = useState<{
+    filterKey: string;
+    requestCursor?: string;
+    backStack: (string | undefined)[];
+  }>({ filterKey, backStack: [] });
+
+  if (listPaging.filterKey !== filterKey) {
+    setListPaging({ filterKey, backStack: [], requestCursor: undefined });
+  }
+
+  const [pageMeta, setPageMeta] = useState<{ nextCursor: string | null; hasNextPage: boolean }>({
+    nextCursor: null,
+    hasNextPage: false
+  });
+  const [sortWarning, setSortWarning] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -90,16 +110,20 @@ export default function DashboardPage() {
             sortBy,
             sortOrder
           },
-          page,
-          pageSize
+          { limit: pageSize, cursor: listPaging.requestCursor }
         );
         if (cancelled) return;
         setItems(result.items);
-        setTotal(result.pageInfo.total);
+        setPageMeta({
+          nextCursor: result.pageInfo.nextCursor,
+          hasNextPage: result.pageInfo.hasNextPage
+        });
+        setSortWarning(result.pageInfo.sortWarning ?? null);
       } catch (err) {
         if (cancelled) return;
         setError("Unable to load deployments. Please try again.");
         setItems([]);
+        setPageMeta({ nextCursor: null, hasNextPage: false });
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -110,10 +134,9 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [checked, fromDate, toDate, application, status, page, pageSize, sortBy, sortOrder]);
+  }, [checked, filterKey, listPaging.requestCursor, pageSize]);
 
   const handleSortColumn = (column: DeploymentsSortBy) => {
-    setPage(1);
     if (sortBy !== column) {
       setSortBy(column);
       setSortOrder("asc");
@@ -122,8 +145,41 @@ export default function DashboardPage() {
     setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
   };
 
-  const byApplication = groupByApplication(items);
-  const hasNextPage = typeof total === "number" ? page * pageSize < total : items.length === pageSize;
+  /** Server orders by execution time for pagination; other columns are sorted on the current page only. */
+  const displayItems = useMemo(() => {
+    if (sortBy === "executedAt") return items;
+    const dir = sortOrder === "asc" ? 1 : -1;
+    const sorted = [...items];
+    const str = (v: string | undefined) => (v ?? "").toLowerCase();
+    sorted.sort((a, b) => {
+      let c = 0;
+      switch (sortBy) {
+        case "application":
+          c = str(a.application).localeCompare(str(b.application));
+          break;
+        case "buildNumber":
+          c = (a.buildNumber ?? -1) - (b.buildNumber ?? -1);
+          break;
+        case "status":
+          c = str(a.status).localeCompare(str(b.status));
+          break;
+        case "executedBy":
+          c = str(a.executedBy).localeCompare(str(b.executedBy));
+          break;
+        case "stage":
+          c = str(a.stage).localeCompare(str(b.stage));
+          break;
+        default:
+          break;
+      }
+      if (c !== 0) return c * dir;
+      return (a.executedAt || "").localeCompare(b.executedAt || "") * -1;
+    });
+    return sorted;
+  }, [items, sortBy, sortOrder]);
+
+  const byApplication = groupByApplication(displayItems);
+  const pageDepth = listPaging.backStack.length + 1;
 
   if (!checked) return null;
   return (
@@ -159,19 +215,19 @@ export default function DashboardPage() {
           <div className="filters">
             <label className="field">
               <span>From date</span>
-              <input className="input" type="date" value={fromDate} onChange={(e) => { setFromDate(e.target.value); setPage(1); }} />
+              <input className="input" type="date" value={fromDate} onChange={(e) => { setFromDate(e.target.value); }} />
             </label>
             <label className="field">
               <span>To date</span>
-              <input className="input" type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); setPage(1); }} />
+              <input className="input" type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); }} />
             </label>
             <label className="field">
               <span>Application / Job</span>
-              <input className="input" value={application} onChange={(e) => { setApplication(e.target.value); setPage(1); }} placeholder="e.g. payments-service" />
+              <input className="input" value={application} onChange={(e) => { setApplication(e.target.value); }} placeholder="e.g. payments-service" />
             </label>
             <label className="field">
               <span>Status</span>
-              <select className="select" value={status} onChange={(e) => { setStatus(e.target.value as "" | "success" | "failure"); setPage(1); }}>
+              <select className="select" value={status} onChange={(e) => { setStatus(e.target.value as "" | "success" | "failure"); }}>
                 <option value="">All</option>
                 <option value="success">Success</option>
                 <option value="failure">Failure</option>
@@ -190,6 +246,9 @@ export default function DashboardPage() {
 
         <section className="panel block">
           <h2 className="block-title">Deployments per application</h2>
+          <p className="subtitle" style={{ marginTop: -6, marginBottom: 10 }}>
+            Counts reflect the current page only (full totals are not loaded).
+          </p>
           <div className="rows">
             {byApplication.map((row) => (
               <div key={row.application} className="row">
@@ -202,6 +261,7 @@ export default function DashboardPage() {
 
         <section className="panel block">
           <h2 className="block-title">Deployments</h2>
+          {sortWarning ? <p className="subtitle" style={{ marginTop: -6, marginBottom: 10 }}>{sortWarning}</p> : null}
           <div className="table-wrap">
             <table className="table">
               <thead>
@@ -246,7 +306,7 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {displayItems.map((item) => (
                   <tr key={item.id}>
                     <td>{item.application}</td>
                     <td>{item.executedAt}</td>
@@ -284,19 +344,50 @@ export default function DashboardPage() {
 
           <div className="table-footer">
             <div className="subtitle" style={{ margin: 0 }}>
-              Page {page}
-              {typeof total === "number" ? ` of ${Math.max(1, Math.ceil(total / pageSize))}` : ""}
+              Page {pageDepth}
+              {!pageMeta.hasNextPage && items.length > 0 ? " (last page)" : ""}
             </div>
             <div className="footer-actions">
-              <select className="select" value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
+              <select
+                className="select"
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                }}
+              >
                 <option value={10}>10 / page</option>
                 <option value={20}>20 / page</option>
                 <option value={50}>50 / page</option>
               </select>
-              <button className="btn btn-ghost" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setListPaging((p) => {
+                    if (p.backStack.length === 0) return p;
+                    const nextStack = [...p.backStack];
+                    const prevCursor = nextStack.pop();
+                    return { ...p, backStack: nextStack, requestCursor: prevCursor };
+                  });
+                }}
+                disabled={listPaging.backStack.length === 0 || loading}
+              >
                 Previous
               </button>
-              <button className="btn btn-primary" onClick={() => setPage((p) => p + 1)} disabled={!hasNextPage}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const next = pageMeta.nextCursor;
+                  if (!next) return;
+                  setListPaging((p) => ({
+                    ...p,
+                    backStack: [...p.backStack, p.requestCursor],
+                    requestCursor: next
+                  }));
+                }}
+                disabled={!pageMeta.hasNextPage || loading}
+              >
                 Next
               </button>
             </div>

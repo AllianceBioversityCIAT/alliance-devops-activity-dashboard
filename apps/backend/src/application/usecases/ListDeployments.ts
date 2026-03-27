@@ -1,5 +1,9 @@
-import { DeploymentRepository, ListDeploymentsFilters, ListDeploymentsPage } from "../../domain/ports/DeploymentRepository.js";
-import { getConfig } from "../../infrastructure/config/env.js";
+import {
+  DeploymentRepository,
+  DeploymentsSortBy,
+  ListDeploymentsFilters,
+  ListDeploymentsQueryPage
+} from "../../domain/ports/DeploymentRepository.js";
 
 export type ListDeploymentsResponse = {
   items: Array<{
@@ -13,7 +17,13 @@ export type ListDeploymentsResponse = {
     pipelineUrl?: string;
     errorMessage?: string;
   }>;
-  pageInfo: { page: number; pageSize: number; total?: number };
+  pageInfo: {
+    limit: number;
+    nextCursor: string | null;
+    hasNextPage: boolean;
+    effectiveSortBy: DeploymentsSortBy;
+    sortWarning?: string;
+  };
 };
 
 export class ListDeployments {
@@ -23,15 +33,15 @@ export class ListDeployments {
     this.repository = repository;
   }
 
-  async execute(filters: ListDeploymentsFilters, page: ListDeploymentsPage): Promise<ListDeploymentsResponse> {
-    const safePage = page.page > 0 ? page.page : 1;
-    const safePageSize = page.pageSize > 0 && page.pageSize <= 100 ? page.pageSize : 10;
+  async execute(filters: ListDeploymentsFilters, page: ListDeploymentsQueryPage): Promise<ListDeploymentsResponse> {
+    const safeLimit = page.limit > 0 && page.limit <= 100 ? page.limit : 10;
+    const result = await this.repository.list(filters, { limit: safeLimit, cursor: page.cursor });
 
-    const result = await this.repository.list(
-      filters,
-      { page: safePage, pageSize: safePageSize },
-      { maxScannedItems: getConfig().dashboardDynamoMaxScannedItems }
-    );
+    const sortWarning =
+      filters.sortBy != null && filters.sortBy !== "executedAt"
+        ? "Server pagination orders by execution time (DynamoDB sort key). Choosing another column sorts only the current page in the browser."
+        : result.sortWarning;
+
     return {
       items: result.items.map((d) => ({
         id: d.id,
@@ -45,9 +55,11 @@ export class ListDeployments {
         errorMessage: d.errorMessage
       })),
       pageInfo: {
-        page: safePage,
-        pageSize: safePageSize,
-        total: result.total
+        limit: safeLimit,
+        nextCursor: result.nextCursor,
+        hasNextPage: result.hasNextPage,
+        effectiveSortBy: result.effectiveSortBy,
+        ...(sortWarning ? { sortWarning } : {})
       }
     };
   }

@@ -16,10 +16,25 @@ export type DeploymentFilters = {
 
 export type DeploymentsApiResponse = {
   items: Deployment[];
-  pageInfo: { page: number; pageSize: number; total?: number };
+  pageInfo: {
+    limit: number;
+    nextCursor: string | null;
+    hasNextPage: boolean;
+    effectiveSortBy: DeploymentsSortBy;
+    sortWarning?: string;
+  };
 };
 
-export async function fetchDeployments(filters: DeploymentFilters, page: number, pageSize: number): Promise<DeploymentsApiResponse> {
+export type FetchDeploymentsPage = {
+  limit: number;
+  /** Opaque cursor from `pageInfo.nextCursor` for the previous response; omit for the first page. */
+  cursor?: string;
+};
+
+export async function fetchDeployments(
+  filters: DeploymentFilters,
+  page: FetchDeploymentsPage
+): Promise<DeploymentsApiResponse> {
   const token = await getIdToken();
   if (!token) {
     throw new Error("Not authenticated");
@@ -32,8 +47,8 @@ export async function fetchDeployments(filters: DeploymentFilters, page: number,
   if (filters.status) query.set("status", filters.status);
   if (filters.sortBy) query.set("sortBy", filters.sortBy);
   if (filters.sortOrder) query.set("sortOrder", filters.sortOrder);
-  query.set("page", String(page));
-  query.set("pageSize", String(pageSize));
+  query.set("pageSize", String(page.limit));
+  if (page.cursor) query.set("cursor", page.cursor);
 
   const client = new ApiClient(getEnv().apiBaseUrl);
   return client.get<DeploymentsApiResponse>(`/api/deployments?${query.toString()}`, {

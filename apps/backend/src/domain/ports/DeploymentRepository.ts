@@ -1,39 +1,33 @@
 import { DeploymentExecution } from "../DeploymentExecution.js";
 
-/** Allowed sort fields (API `sortBy`); applied in application/domain after fetch, before pagination. */
+/** Allowed sort fields (API `sortBy`). Server-side pagination uses buildDate / execution time only; see sortWarning on responses. */
 export type DeploymentsSortBy = "executedAt" | "application" | "buildNumber" | "status" | "executedBy" | "stage";
 
 export type ListDeploymentsFilters = {
   from?: string; // ISO string inclusive
-  to?: string;   // ISO string inclusive
+  to?: string; // ISO string inclusive
   application?: string;
   status?: "success" | "failure" | "unknown";
   sortBy?: DeploymentsSortBy;
   sortOrder?: "asc" | "desc";
 };
 
-export type ListDeploymentsPage = {
-  page: number;
-  pageSize: number;
+/** Cursor-based page (Dashboard: DynamoDB GSI Query + LastEvaluatedKey; no page numbers). */
+export type ListDeploymentsQueryPage = {
+  limit: number;
+  /** Opaque cursor from previous response `pageInfo.nextCursor`. */
+  cursor?: string;
 };
 
-/**
- * DynamoDB Scan is paginated; optional maxScannedItems caps total items evaluated per call (dashboard cost guard).
- * Omit maxScannedItems or leave undefined to scan the full table (Executive Summary / decision views).
- */
-export type ListDeploymentsListOptions = {
-  maxScannedItems?: number;
-};
-
-export type ListDeploymentsResult = {
+export type ListDeploymentsQueryResult = {
   items: DeploymentExecution[];
-  total?: number; // optional; may be omitted for scan-based MVP
+  nextCursor: string | null;
+  hasNextPage: boolean;
+  /** Always `executedAt` / buildDate order from DynamoDB for stable pagination. */
+  effectiveSortBy: DeploymentsSortBy;
+  sortWarning?: string;
 };
 
 export interface DeploymentRepository {
-  list(
-    filters: ListDeploymentsFilters,
-    page: ListDeploymentsPage,
-    options?: ListDeploymentsListOptions
-  ): Promise<ListDeploymentsResult>;
+  list(filters: ListDeploymentsFilters, page: ListDeploymentsQueryPage): Promise<ListDeploymentsQueryResult>;
 }
