@@ -1,4 +1,5 @@
 import { DeploymentRepository, ListDeploymentsFilters, ListDeploymentsPage } from "../../domain/ports/DeploymentRepository.js";
+import { getConfig } from "../../infrastructure/config/env.js";
 
 export type ListDeploymentsResponse = {
   items: Array<{
@@ -26,7 +27,11 @@ export class ListDeployments {
     const safePage = page.page > 0 ? page.page : 1;
     const safePageSize = page.pageSize > 0 && page.pageSize <= 100 ? page.pageSize : 10;
 
-    const result = await this.repository.list(filters, { page: safePage, pageSize: safePageSize });
+    const result = await this.repository.list(
+      filters,
+      { page: safePage, pageSize: safePageSize },
+      { maxScannedItems: getConfig().dashboardDynamoMaxScannedItems }
+    );
     return {
       items: result.items.map((d) => ({
         id: d.id,

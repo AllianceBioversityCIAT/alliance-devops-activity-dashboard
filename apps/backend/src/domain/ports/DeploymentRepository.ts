@@ -17,11 +17,23 @@ export type ListDeploymentsPage = {
   pageSize: number;
 };
 
+/**
+ * DynamoDB Scan is paginated; optional maxScannedItems caps total items evaluated per call (dashboard cost guard).
+ * Omit maxScannedItems or leave undefined to scan the full table (Executive Summary / decision views).
+ */
+export type ListDeploymentsListOptions = {
+  maxScannedItems?: number;
+};
+
 export type ListDeploymentsResult = {
   items: DeploymentExecution[];
   total?: number; // optional; may be omitted for scan-based MVP
 };
 
 export interface DeploymentRepository {
-  list(filters: ListDeploymentsFilters, page: ListDeploymentsPage): Promise<ListDeploymentsResult>;
+  list(
+    filters: ListDeploymentsFilters,
+    page: ListDeploymentsPage,
+    options?: ListDeploymentsListOptions
+  ): Promise<ListDeploymentsResult>;
 }

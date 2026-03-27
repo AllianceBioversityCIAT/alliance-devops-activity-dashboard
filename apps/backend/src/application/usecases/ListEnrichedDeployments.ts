@@ -36,6 +36,7 @@ export class ListEnrichedDeployments {
     const safePageSize = page.pageSize > 0 && page.pageSize <= 100 ? page.pageSize : 10;
     const debug = options?.debug === true;
 
+    // Full DynamoDB table scan (no maxScannedItems cap) so decision metrics include all matching rows.
     const result = await this.deployments.list(filters, { page: safePage, pageSize: safePageSize });
 
     const uniqueJobNames = new Set<string>();

@@ -5,6 +5,7 @@ import {
   DeploymentRepository,
   DeploymentsSortBy,
   ListDeploymentsFilters,
+  ListDeploymentsListOptions,
   ListDeploymentsPage,
   ListDeploymentsResult
 } from "../../domain/ports/DeploymentRepository.js";
@@ -12,8 +13,10 @@ import { DeploymentExecution } from "../../domain/DeploymentExecution.js";
 
 // MVP note:
 // We use a scan-based approach with optional FilterExpression due to unknown key design.
-// To keep costs safe locally, we cap the scan to a reasonable upper bound per request.
-const MAX_SCAN_LIMIT = 1000;
+// A single Scan with Limit only evaluates that many table items; FilterExpression does not
+// reduce scanned items. We paginate with LastEvaluatedKey so date/job filters see all rows.
+// Optional maxScannedItems (dashboard) caps total evaluated items; omit for full-table scan (Executive Summary).
+const SCAN_PAGE_ITEM_LIMIT = 1000;
 
 export class DynamoDeploymentRepository implements DeploymentRepository {
   private readonly doc: DynamoDBDocumentClient;
@@ -32,7 +35,12 @@ export class DynamoDeploymentRepository implements DeploymentRepository {
     this.doc = DynamoDBDocumentClient.from(client);
   }
 
-  async list(filters: ListDeploymentsFilters, page: ListDeploymentsPage): Promise<ListDeploymentsResult> {
+  async list(
+    filters: ListDeploymentsFilters,
+    page: ListDeploymentsPage,
+    options?: ListDeploymentsListOptions
+  ): Promise<ListDeploymentsResult> {
+    const maxScannedItems = options?.maxScannedItems;
     // Build FilterExpression over attributes: buildDate, job, result
     const exprs: string[] = [];
     const names: Record<string, string> = {};
@@ -62,18 +70,43 @@ export class DynamoDeploymentRepository implements DeploymentRepository {
       values[":result"] = wanted;
     }
 
-    const input: ScanCommandInput = {
+    const baseInput: ScanCommandInput = {
       TableName: this.tableName,
-      Limit: MAX_SCAN_LIMIT
+      Limit: SCAN_PAGE_ITEM_LIMIT
     };
     if (exprs.length > 0) {
-      input.FilterExpression = exprs.join(" AND ");
-      input.ExpressionAttributeNames = names;
-      input.ExpressionAttributeValues = values;
+      baseInput.FilterExpression = exprs.join(" AND ");
+      baseInput.ExpressionAttributeNames = names;
+      baseInput.ExpressionAttributeValues = values;
     }
 
-    const scanResp = await this.doc.send(new ScanCommand(input));
-    const items = (scanResp.Items ?? []).map(mapRecordToDomain);
+    const rawItems: Record<string, unknown>[] = [];
+    let exclusiveStartKey: Record<string, unknown> | undefined;
+    let totalScanned = 0;
+
+    do {
+      const input: ScanCommandInput = { ...baseInput };
+      if (exclusiveStartKey) {
+        input.ExclusiveStartKey = exclusiveStartKey;
+      }
+      const scanResp = await this.doc.send(new ScanCommand(input));
+      const pageItems = scanResp.Items ?? [];
+      rawItems.push(...pageItems);
+      const scannedThisPage = scanResp.ScannedCount ?? SCAN_PAGE_ITEM_LIMIT;
+      totalScanned += scannedThisPage;
+      exclusiveStartKey = scanResp.LastEvaluatedKey as Record<string, unknown> | undefined;
+
+      if (maxScannedItems != null && totalScanned >= maxScannedItems) {
+        if (exclusiveStartKey) {
+          console.warn(
+            `[DynamoDeploymentRepository] Scan stopped after ${maxScannedItems} items evaluated; table may have more rows.`
+          );
+        }
+        break;
+      }
+    } while (exclusiveStartKey);
+
+    const items = rawItems.map(mapRecordToDomain);
 
     const sortBy = filters.sortBy ?? "executedAt";
     const sortOrder = filters.sortOrder ?? "desc";
