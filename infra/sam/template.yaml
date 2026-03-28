@@ -108,6 +108,7 @@ Resources:
           AWS_REGION_DO: !Ref AwsRegion
           AWS_ACCESS_KEY_ID_DO: !Ref AwsAccessKeyId
           AWS_SECRET_ACCESS_KEY_DO: !Ref AwsSecretAccessKey
+          ENVIRONMENT_NAME: !Ref EnvironmentName
           DYNAMODB_TABLE_NAME: !Ref DynamoDbTableName
           DYNAMODB_DEPLOYMENT_METADATA_TABLE_NAME: !Ref DeploymentMetadataTableName
           COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
