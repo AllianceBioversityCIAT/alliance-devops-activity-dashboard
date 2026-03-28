@@ -105,9 +105,9 @@ Resources:
             Method: ANY
       Environment:
         Variables:
-          AWS_REGION: !Ref AwsRegion
-          AWS_ACCESS_KEY_ID: !Ref AwsAccessKeyId
-          AWS_SECRET_ACCESS_KEY: !Ref AwsSecretAccessKey
+          AWS_REGION_DO: !Ref AwsRegion
+          AWS_ACCESS_KEY_ID_DO: !Ref AwsAccessKeyId
+          AWS_SECRET_ACCESS_KEY_DO: !Ref AwsSecretAccessKey
           DYNAMODB_TABLE_NAME: !Ref DynamoDbTableName
           DYNAMODB_DEPLOYMENT_METADATA_TABLE_NAME: !Ref DeploymentMetadataTableName
           COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId

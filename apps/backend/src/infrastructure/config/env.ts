@@ -32,6 +32,10 @@ type AppConfig = {
 export function getConfig(): AppConfig {
   const {
     PORT,
+    AWS_REGION_DO,
+    AWS_ACCESS_KEY_ID_DO,
+    AWS_SECRET_ACCESS_KEY_DO,
+    // Backward-compat (temporary): allow standard names if *_DO not set
     AWS_REGION,
     AWS_ACCESS_KEY_ID,
     AWS_SECRET_ACCESS_KEY,
@@ -56,14 +60,18 @@ export function getConfig(): AppConfig {
     EXEC_SUMMARY_JOB_QUERY_CONCURRENCY
   } = process.env;
 
-  if (!AWS_REGION) {
-    throw new Error("Missing required environment variable: AWS_REGION");
+  const resolvedRegion = (AWS_REGION_DO ?? AWS_REGION)?.trim();
+  const resolvedAccessKeyId = (AWS_ACCESS_KEY_ID_DO ?? AWS_ACCESS_KEY_ID)?.trim();
+  const resolvedSecretAccessKey = (AWS_SECRET_ACCESS_KEY_DO ?? AWS_SECRET_ACCESS_KEY)?.trim();
+
+  if (!resolvedRegion) {
+    throw new Error("Missing required environment variable: AWS_REGION_DO");
   }
-  if (!AWS_ACCESS_KEY_ID) {
-    throw new Error("Missing required environment variable: AWS_ACCESS_KEY_ID");
+  if (!resolvedAccessKeyId) {
+    throw new Error("Missing required environment variable: AWS_ACCESS_KEY_ID_DO");
   }
-  if (!AWS_SECRET_ACCESS_KEY) {
-    throw new Error("Missing required environment variable: AWS_SECRET_ACCESS_KEY");
+  if (!resolvedSecretAccessKey) {
+    throw new Error("Missing required environment variable: AWS_SECRET_ACCESS_KEY_DO");
   }
 
   const dashboardMaxParsed = Number(DASHBOARD_DYNAMO_MAX_SCANNED_ITEMS ?? 200_000);
@@ -80,9 +88,9 @@ export function getConfig(): AppConfig {
 
   return {
     port: Number(PORT ?? 4000),
-    awsRegion: AWS_REGION,
-    awsAccessKeyId: AWS_ACCESS_KEY_ID,
-    awsSecretAccessKey: AWS_SECRET_ACCESS_KEY,
+    awsRegion: resolvedRegion,
+    awsAccessKeyId: resolvedAccessKeyId,
+    awsSecretAccessKey: resolvedSecretAccessKey,
     dynamoTableName: DYNAMODB_TABLE_NAME ?? "jenkinsexecutions_test",
     dashboardDynamoMaxScannedItems,
     execSummaryExecutionsStrategy,
