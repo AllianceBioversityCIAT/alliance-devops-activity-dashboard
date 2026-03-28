@@ -15,7 +15,12 @@ export default function AuthPage() {
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
     // eslint-disable-next-line no-console
-    console.log("[AUTH] /auth mounted", { hasCode: Boolean(code) });
+    console.log("[AUTH] mounted", {
+      href: typeof window !== "undefined" ? window.location.href : "",
+      pathname: typeof window !== "undefined" ? window.location.pathname : "",
+      search: typeof window !== "undefined" ? window.location.search : "",
+      hasCode: Boolean(code)
+    });
     if (!code) {
       setError("Missing authorization code");
       return;

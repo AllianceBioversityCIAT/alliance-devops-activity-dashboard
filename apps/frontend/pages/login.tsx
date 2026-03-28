@@ -1,7 +1,12 @@
 import Head from "next/head";
+import { useEffect } from "react";
 import { startHostedLogin } from "../src/infrastructure/auth/CognitoClient";
 
 export default function LoginPage() {
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log("[LOGIN] mounted", { href: typeof window !== "undefined" ? window.location.href : "" });
+  }, []);
   return (
     <>
       <Head>
