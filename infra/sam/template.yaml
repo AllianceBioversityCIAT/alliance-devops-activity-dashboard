@@ -197,6 +197,9 @@ Resources:
           AllowedMethods: [GET, HEAD, OPTIONS]
           CachedMethods: [GET, HEAD]
           Compress: true
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !Ref FrontendRewriteFunction
           ForwardedValues:
             QueryString: false
             Cookies:
@@ -217,6 +220,29 @@ Resources:
           Value: dashboard
         - Key: Environment
           Value: !Ref EnvironmentName
+
+  FrontendRewriteFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "${EnvironmentName}-frontend-rewrite-index"
+      AutoPublish: true
+      FunctionConfig:
+        Comment: "Rewrite directory paths to /index.html (e.g., /auth -> /auth/index.html)"
+        Runtime: cloudfront-js-1.0
+      FunctionCode: |
+        function handler(event) {
+          var req = event.request;
+          var uri = req.uri;
+          // If the URI has no file extension and is not ending with '/', rewrite to '/index.html'
+          if (!uri.includes('.') ) {
+            if (uri.endsWith('/')) {
+              req.uri = uri + 'index.html';
+            } else {
+              req.uri = uri + '/index.html';
+            }
+          }
+          return req;
+        }
 
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
