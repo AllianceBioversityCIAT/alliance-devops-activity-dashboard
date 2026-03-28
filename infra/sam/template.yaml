@@ -233,12 +233,13 @@ Resources:
         function handler(event) {
           var req = event.request;
           var uri = req.uri;
-          // If URI has no file extension, attempt .html first, then /index.html
-          if (!uri.includes('.')) {
-            // Try '/path.html'
-            var htmlCandidate = uri.endsWith('/') ? uri.slice(0, -1) + '.html' : uri + '.html';
-            // Hint CloudFront/S3 by switching to .html; if object missing S3 will 404 and default error response may still fallback
-            req.uri = htmlCandidate;
+          // If the URI has no file extension, rewrite to '/index.html'
+          if (uri.indexOf('.') === -1) {
+            if (uri.endsWith('/')) {
+              req.uri = uri + 'index.html';
+            } else {
+              req.uri = uri + '/index.html';
+            }
           }
           return req;
         }
