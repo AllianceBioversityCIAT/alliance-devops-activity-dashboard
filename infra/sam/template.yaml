@@ -95,7 +95,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${BackendFunctionName}-${EnvironmentName}"
       CodeUri: ../../apps/backend/
-      Handler: src/lambda.handler
+      Handler: lambda.handler
       Events:
         ProxyApi:
           Type: HttpApi
@@ -143,7 +143,7 @@ Resources:
         Minify: true
         Target: es2020
         Sourcemap: false
-        Format: esm
+        Format: cjs
         OutExtension:
           - .js=.js
         External:
