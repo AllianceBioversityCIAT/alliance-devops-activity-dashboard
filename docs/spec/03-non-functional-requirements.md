@@ -233,6 +233,8 @@ The system must avoid loading excessive data.
 - Implement pagination or limits.
 - Optimize queries to DynamoDB.
 
+**Follow-up (Executive Summary):** The Executive Summary intentionally aggregates a full selected window per request while using Query-scoped reads. For future scale, see **§ 6.1** in `docs/spec/07-implementation-plan.md` (performance optimization — backlog).
+
 ---
 
 ## 9. Maintainability

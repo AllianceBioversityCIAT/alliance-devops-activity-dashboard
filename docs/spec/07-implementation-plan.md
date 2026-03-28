@@ -473,3 +473,39 @@ Requirements:
 - Ensure project runs locally
 - Follow hexagonal architecture for backend
 ```
+
+---
+
+## 6. Future Enhancements
+
+The items in this section are **not** part of the MVP delivery. They are documented for prioritization in later sprints when scale, cost, or latency warrant investment.
+
+### 6.1 Executive Summary — performance optimization (on-demand aggregation)
+
+**Context**
+
+The Executive Summary retrieves execution records via **Query-based** DynamoDB access (GSI key conditions over job and/or time dimensions, rather than scanning the entire executions table). Each request still **materializes** the matching result set for the selected filters and window, then **enriches** and **aggregates** that data in the application layer to produce KPIs, trends, and breakdowns.
+
+**Current state**
+
+This design is **correct**, **spec-aligned**, and **acceptable for the current scale** of data and traffic. It does **not** represent an urgent defect or blocking risk.
+
+**Proposed improvement**
+
+In a **future sprint**, plan a **performance optimization** when volume or usage growth makes on-demand aggregation measurable in cost or response time. Directional options include:
+
+- **Pre-aggregated summary data** — persist rollups (for example by time bucket, project, or application) and serve Executive Summary from those structures, with clear rules for freshness and filter coverage.
+- **Response caching** — cache responses or partial computations for stable filter combinations (with TTL and/or explicit invalidation), respecting authentication and no leakage across tenants if the product later expands beyond a single pool of users.
+- **Periodic background aggregation** — scheduled jobs (for example EventBridge-triggered Lambda) to compute or refresh summary windows so interactive reads are lighter.
+
+Any solution must continue to satisfy spec constraints: deterministic outputs, data derived from real deployment records, and no synthetic KPIs.
+
+**Expected benefits**
+
+- Fewer repeated full-range reads and less in-process aggregation work per user action.
+- Improved response times and more predictable latency under concurrent load.
+- Lower DynamoDB read consumption and Lambda compute for Executive Summary traffic.
+
+**Priority / recommendation**
+
+**Medium — backlog.** Treat as a **performance and cost** initiative, not a correctness or MVP gate. Revisit when operational metrics (latency, RCUs, request volume, or date-range size) justify the engineering and operational cost of caching or materialized summaries.
