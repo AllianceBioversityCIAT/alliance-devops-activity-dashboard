@@ -16,6 +16,13 @@ export function createApp() {
     next();
   });
 
+  // Temporary request logging to debug auth flow
+  app.use((req, _res, next) => {
+    // eslint-disable-next-line no-console
+    console.log(`[REQ] ${req.method} ${req.url}`);
+    next();
+  });
+
   app.use(
     cors({
       // Reflect request origin (allows CloudFront domain and local dev)
