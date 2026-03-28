@@ -28,18 +28,25 @@ export async function getIdToken(): Promise<string | null> {
 
 export function startHostedLogin() {
   const { apiBaseUrl } = getEnv();
+  // eslint-disable-next-line no-console
+  console.log("[AUTH] Redirecting to authorize via API", { apiBaseUrl });
   window.location.href = `${apiBaseUrl}/auth/authorize`;
 }
 
 export async function exchangeAuthCode(code: string) {
   const { apiBaseUrl } = getEnv();
+  // eslint-disable-next-line no-console
+  console.log("[AUTH] Exchanging code", { apiBaseUrl, hasCode: Boolean(code) });
   const res = await fetch(`${apiBaseUrl}/auth/exchange`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code })
   });
   if (!res.ok) {
-    throw new Error("Token exchange failed");
+    const text = await res.text().catch(() => "");
+    // eslint-disable-next-line no-console
+    console.error("[AUTH] Exchange failed", { status: res.status, body: text?.slice(0, 500) });
+    throw new Error(`Token exchange failed (${res.status})`);
   }
   const data = await res.json();
   // Normalize and store the id token under idToken for MVP usage

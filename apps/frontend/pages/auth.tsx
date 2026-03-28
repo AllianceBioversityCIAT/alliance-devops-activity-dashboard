@@ -14,6 +14,8 @@ export default function AuthPage() {
 
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
+    // eslint-disable-next-line no-console
+    console.log("[AUTH] /auth mounted", { hasCode: Boolean(code) });
     if (!code) {
       setError("Missing authorization code");
       return;
@@ -21,9 +23,11 @@ export default function AuthPage() {
     (async () => {
       try {
         await exchangeAuthCode(code);
+        // eslint-disable-next-line no-console
+        console.log("[AUTH] Exchange success; redirecting to /dashboard");
         router.replace("/dashboard");
-      } catch {
-        setError("Token exchange failed");
+      } catch (e: any) {
+        setError(e?.message ?? "Token exchange failed");
       }
     })();
   }, [router]);

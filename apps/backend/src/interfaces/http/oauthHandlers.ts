@@ -6,6 +6,13 @@ export function authorizeHandler(_req: Request, res: Response) {
   if (!cognitoDomain || !cognitoAppClientId || !frontendRedirectUri) {
     return res.status(500).json({ error: "OAuth not configured" });
   }
+  // eslint-disable-next-line no-console
+  console.log("[AUTH] /auth/authorize", {
+    domain: cognitoDomain,
+    clientId: mask(cognitoAppClientId),
+    redirectUri: frontendRedirectUri,
+    identityProvider: cognitoIdentityProvider ?? null
+  });
   const authorizeUrl = new URL(`/oauth2/authorize`, ensureHttps(cognitoDomain));
   authorizeUrl.searchParams.set("client_id", cognitoAppClientId);
   authorizeUrl.searchParams.set("response_type", "code");
@@ -27,6 +34,12 @@ export async function exchangeHandler(req: Request, res: Response) {
 
   try {
     const tokenUrl = new URL(`/oauth2/token`, ensureHttps(cognitoDomain)).toString();
+    // eslint-disable-next-line no-console
+    console.log("[AUTH] /auth/exchange START", {
+      tokenUrl,
+      clientId: mask(cognitoAppClientId),
+      redirectUri: frontendRedirectUri
+    });
     const body = new URLSearchParams({
       grant_type: "authorization_code",
       client_id: cognitoAppClientId,
@@ -46,11 +59,16 @@ export async function exchangeHandler(req: Request, res: Response) {
     if (!resp.ok) {
       const text = await resp.text();
       // eslint-disable-next-line no-console
-      console.error("Cognito token exchange failed:", { status: resp.status, body: text });
+      console.error("Cognito token exchange failed:", { status: resp.status, body: text?.slice(0, 500) });
       return res.status(401).json({ error: "Token exchange failed" });
     }
 
     const tokens = await resp.json();
+    // eslint-disable-next-line no-console
+    console.log("[AUTH] /auth/exchange OK", {
+      hasIdToken: Boolean(tokens?.id_token),
+      hasAccessToken: Boolean(tokens?.access_token)
+    });
     // Return tokens JSON to frontend callback for storage
     return res.json(tokens);
   } catch (err: any) {
@@ -63,4 +81,10 @@ export async function exchangeHandler(req: Request, res: Response) {
 function ensureHttps(domainOrUrl: string): string {
   if (domainOrUrl.startsWith("http://") || domainOrUrl.startsWith("https://")) return domainOrUrl;
   return `https://${domainOrUrl}`;
+}
+
+function mask(value: string): string {
+  if (!value) return "";
+  if (value.length <= 6) return "***";
+  return `${value.slice(0, 3)}***${value.slice(-3)}`;
 }
