@@ -13,9 +13,6 @@ Parameters:
   BackendFunctionName:
     Type: String
     Default: devops-activity-dashboard-backend
-  FrontendBucketName:
-    Type: String
-    Description: Global unique S3 bucket name for static frontend assets
   DynamoDbTableName:
     Type: String
     Default: jenkinsexecutions_test
