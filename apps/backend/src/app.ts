@@ -18,7 +18,8 @@ export function createApp() {
 
   app.use(
     cors({
-      origin: [/^http:\/\/localhost:\d+$/],
+      // Reflect request origin (allows CloudFront domain and local dev)
+      origin: true,
       credentials: false,
       methods: ["GET", "POST", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization"]
