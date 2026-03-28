@@ -74,7 +74,7 @@ Resources:
   BackendApi:
     Type: AWS::Serverless::HttpApi
     Properties:
-      StageName: !Ref EnvironmentName
+      StageName: $default
       CorsConfiguration:
         AllowOrigins:
           - "*"
@@ -238,7 +238,7 @@ Resources:
 Outputs:
   BackendApiBaseUrl:
     Description: Base URL for backend API stage
-    Value: !Sub "https://${BackendApi}.execute-api.${AwsRegion}.amazonaws.com/${EnvironmentName}"
+    Value: !Sub "https://${BackendApi}.execute-api.${AwsRegion}.amazonaws.com"
   FrontendBucketOutput:
     Description: S3 bucket hosting frontend static assets
     Value: !Ref FrontendBucket
