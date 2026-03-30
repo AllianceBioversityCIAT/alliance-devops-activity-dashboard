@@ -24,6 +24,9 @@ export default function LoginPage() {
             <button type="button" onClick={() => startHostedLogin()} className="login-btn">
               Sign in with corporate account
             </button>
+            <p className="brand-note" aria-label="Brand">
+              CGIAR DevOps Activity Dashboard
+            </p>
           </div>
         </section>
         <section className="right" aria-label="DevOps illustration" />
@@ -75,6 +78,12 @@ export default function LoginPage() {
           background: #111827;
           color: #ffffff;
           cursor: pointer;
+        }
+        .brand-note {
+          margin-top: 10px;
+          color: #667085;
+          font-size: 12px;
+          letter-spacing: 0.02em;
         }
         .right {
           min-height: 100vh;
