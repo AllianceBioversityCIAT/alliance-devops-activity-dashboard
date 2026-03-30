@@ -15,7 +15,8 @@ import {
   mostActiveProject,
   projectOptionsFromDataset,
   repeatedFailures,
-  topFailingApplications
+  topFailingApplications,
+  APPLICATION_ENV_SEPARATOR
 } from "@application/executiveSummary";
 import { logExecutiveSummaryUiFinalDataset } from "@application/executiveSummaryDatasetDebug";
 
@@ -127,6 +128,72 @@ export default function SummaryPage() {
   }, [datasetItems, loading]);
 
   if (!checked) return null;
+
+  function splitApplicationAndEnv(label: string): { app: string; env: string } {
+    const idx = label.indexOf(APPLICATION_ENV_SEPARATOR);
+    if (idx === -1) return { app: label.trim(), env: "" };
+    const app = label.slice(0, idx).trim();
+    const env = label.slice(idx + APPLICATION_ENV_SEPARATOR.length).trim();
+    return { app, env };
+  }
+
+  function AppEnvironmentLabel({ appName, environment }: { appName: string; environment: string }) {
+    const ENV_STYLES: Record<string, { backgroundColor: string; border: string; color: string }> = {
+      PROD: {
+        backgroundColor: "#EFF6FF",
+        border: "1px solid #BFDBFE",
+        color: "#1D4ED8"
+      },
+      STAGING: {
+        backgroundColor: "#FFFBEB",
+        border: "1px solid #FDE68A",
+        color: "#B45309"
+      },
+      DEV: {
+        backgroundColor: "#F3F4F6",
+        border: "1px solid #D1D5DB",
+        color: "#374151"
+      }
+    };
+
+    const env = (environment || "").toUpperCase();
+    const envStyle = ENV_STYLES[env] || ENV_STYLES.DEV;
+
+    const badgeStyle = {
+      display: "inline-flex",
+      alignItems: "center",
+      padding: "2px 8px",
+      borderRadius: "999px",
+      fontSize: "11px",
+      fontWeight: 600,
+      lineHeight: 1.2,
+      marginLeft: "8px",
+      textTransform: "uppercase" as const,
+      cursor: "default",
+      whiteSpace: "nowrap" as const,
+      ...envStyle
+    };
+
+    const wrapperStyle = {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "0px",
+      flexWrap: "wrap" as const
+    };
+
+    const appNameStyle = {
+      fontSize: "14px",
+      fontWeight: 400,
+      color: "#111827"
+    };
+
+    return (
+      <span style={wrapperStyle}>
+        <span style={appNameStyle}>{appName}</span>
+        {env ? <span style={badgeStyle}>{env}</span> : null}
+      </span>
+    );
+  }
 
   return (
     <>
@@ -281,7 +348,10 @@ export default function SummaryPage() {
             ) : (
               topFailing.map((x) => (
                 <div key={x.application} className="row">
-                  <span>{x.application}</span>
+                  <AppEnvironmentLabel
+                    appName={splitApplicationAndEnv(x.application).app}
+                    environment={splitApplicationAndEnv(x.application).env}
+                  />
                   <strong>{x.failures} failures</strong>
                 </div>
               ))
@@ -292,7 +362,10 @@ export default function SummaryPage() {
             ) : (
               repeated.map((x) => (
                 <div key={`rep-${x.application}`} className="row">
-                  <span>{x.application}</span>
+                  <AppEnvironmentLabel
+                    appName={splitApplicationAndEnv(x.application).app}
+                    environment={splitApplicationAndEnv(x.application).env}
+                  />
                   <strong>{x.failures} failures</strong>
                 </div>
               ))
@@ -302,11 +375,14 @@ export default function SummaryPage() {
 
         <section className="panel block">
           <h2 className="block-title">Breakdown by Application</h2>
-          <p className="section-hint">Each row is application and environment (e.g. Reporting Tool — prod).</p>
+          <p className="section-hint">Each row is application with an environment badge (e.g. Reporting Tool [PROD]).</p>
           <div className="rows">
             {byApp.map((x) => (
               <div key={x.application} className="row">
-                <span>{x.application}</span>
+                <AppEnvironmentLabel
+                  appName={splitApplicationAndEnv(x.application).app}
+                  environment={splitApplicationAndEnv(x.application).env}
+                />
                 <span>
                   Total: {x.total} | Failures: {x.failures}
                 </span>
