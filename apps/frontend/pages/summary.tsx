@@ -320,112 +320,132 @@ export default function SummaryPage() {
 
         {hasLoaded ? (
           <>
-        <section className="metrics">
-          <div className="panel metric">
-            <div className="metric-label">Total deployments</div>
-            <div className="metric-value">{kpis.totalDeployments}</div>
-          </div>
-          <div className="panel metric">
-            <div className="metric-label">Success count</div>
-            <div className="metric-value success">{kpis.successCount}</div>
-          </div>
-          <div className="panel metric">
-            <div className="metric-label">Failure count</div>
-            <div className="metric-value failure">{kpis.failureCount}</div>
-          </div>
-          <div className="panel metric">
-            <div className="metric-label">Success rate</div>
-            <div className="metric-value">{kpis.successRate}%</div>
-          </div>
-        </section>
-
-        <section className="panel block">
-          <h2 className="block-title">Attention Required</h2>
-          <div className="rows">
-            <div className="row-title">Top failing applications (app + environment, Top 3)</div>
-            {topFailing.length === 0 ? (
-              <div className="row muted">No failing applications in current filter scope.</div>
-            ) : (
-              topFailing.map((x) => (
-                <div key={x.application} className="row">
-                  <AppEnvironmentLabel
-                    appName={splitApplicationAndEnv(x.application).app}
-                    environment={splitApplicationAndEnv(x.application).env}
-                  />
-                  <strong>{x.failures} failures</strong>
-                </div>
-              ))
-            )}
-            <div className="row-title">Repeated failures</div>
-            {repeated.length === 0 ? (
-              <div className="row muted">No repeated failures detected.</div>
-            ) : (
-              repeated.map((x) => (
-                <div key={`rep-${x.application}`} className="row">
-                  <AppEnvironmentLabel
-                    appName={splitApplicationAndEnv(x.application).app}
-                    environment={splitApplicationAndEnv(x.application).env}
-                  />
-                  <strong>{x.failures} failures</strong>
-                </div>
-              ))
-            )}
-          </div>
-        </section>
-
-        <section className="panel block">
-          <h2 className="block-title">Breakdown by Application</h2>
-          <p className="section-hint">Each row is application with an environment badge (e.g. Reporting Tool [PROD]).</p>
-          <div className="rows">
-            {byApp.map((x) => (
-              <div key={x.application} className="row">
-                <AppEnvironmentLabel
-                  appName={splitApplicationAndEnv(x.application).app}
-                  environment={splitApplicationAndEnv(x.application).env}
-                />
-                <span>
-                  Total: {x.total} | Failures: {x.failures}
-                </span>
+            <section className="metrics">
+              <div className="panel metric">
+                <div className="metric-label">Total deployments</div>
+                <div className="metric-value">{kpis.totalDeployments}</div>
               </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel block">
-          <h2 className="block-title">Breakdown by Project</h2>
-          <div className="rows">
-            {byProject.map((x) => (
-              <div key={x.project} className="row">
-                <span>{x.project}</span>
-                <span>
-                  Total: {x.total} | Failures: {x.failures}
-                </span>
+              <div className="panel metric">
+                <div className="metric-label">Success count</div>
+                <div className="metric-value success">{kpis.successCount}</div>
               </div>
-            ))}
-          </div>
-        </section>
+              <div className="panel metric">
+                <div className="metric-label">Failure count</div>
+                <div className="metric-value failure">{kpis.failureCount}</div>
+              </div>
+              <div className="panel metric">
+                <div className="metric-label">Success rate</div>
+                <div className="metric-value">{kpis.successRate}%</div>
+              </div>
+            </section>
 
-        <section className="panel block">
-          <h2 className="block-title">Insights</h2>
-          <ul className="insights">
-            <li>
-              Most active application:{" "}
-              <strong>{mostActive ? `${mostActive.application} (${mostActive.count})` : "N/A"}</strong>
-            </li>
-            <li>
-              Most active project: <strong>{mostActiveProj ? `${mostActiveProj.project} (${mostActiveProj.count})` : "N/A"}</strong>
-            </li>
-            <li>
-              Top failing application:{" "}
-              <strong>
-                {topFailing[0] ? `${topFailing[0].application} (${topFailing[0].failures} failures)` : "N/A"}
-              </strong>
-            </li>
-            <li>
-              Failure trend vs previous period: <strong>{trend}</strong>
-            </li>
-          </ul>
-        </section>
+            <section className="panel block">
+              <h2 className="block-title">Attention Required</h2>
+              <div className="rows">
+                <div className="row-title">Top failing applications (app + environment, Top 3)</div>
+                {topFailing.length === 0 ? (
+                  <div className="row muted">No failing applications in current filter scope.</div>
+                ) : (
+                  topFailing.map((x) => (
+                    <div key={x.application} className="row">
+                      <AppEnvironmentLabel
+                        appName={splitApplicationAndEnv(x.application).app}
+                        environment={splitApplicationAndEnv(x.application).env}
+                      />
+                      <strong>{x.failures} failures</strong>
+                    </div>
+                  ))
+                )}
+                <div className="row-title">Repeated failures</div>
+                {repeated.length === 0 ? (
+                  <div className="row muted">No repeated failures detected.</div>
+                ) : (
+                  repeated.map((x) => (
+                    <div key={`rep-${x.application}`} className="row">
+                      <AppEnvironmentLabel
+                        appName={splitApplicationAndEnv(x.application).app}
+                        environment={splitApplicationAndEnv(x.application).env}
+                      />
+                      <strong>{x.failures} failures</strong>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section className="panel block">
+              <h2 className="block-title">Breakdown by Application</h2>
+              <p className="section-hint">Each row is application with an environment badge (e.g. Reporting Tool [PROD]).</p>
+              <div className="rows">
+                {byApp.map((x) => (
+                  <div key={x.application} className="row">
+                    <AppEnvironmentLabel
+                      appName={splitApplicationAndEnv(x.application).app}
+                      environment={splitApplicationAndEnv(x.application).env}
+                    />
+                    <span>
+                      Total: {x.total} | Failures: {x.failures}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="panel block">
+              <h2 className="block-title">Breakdown by Project</h2>
+              <div className="rows">
+                {byProject.map((x) => (
+                  <div key={x.project} className="row">
+                    <span>{x.project}</span>
+                    <span>
+                      Total: {x.total} | Failures: {x.failures}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="panel block">
+              <h2 className="block-title">Insights</h2>
+              <ul className="insights">
+                <li>
+                  Most active application:{" "}
+                  {mostActive ? (
+                    <>
+                      <AppEnvironmentLabel
+                        appName={splitApplicationAndEnv(mostActive.application).app}
+                        environment={splitApplicationAndEnv(mostActive.application).env}
+                      />
+                      {" "}
+                      <strong>({mostActive.count})</strong>
+                    </>
+                  ) : (
+                    <strong>N/A</strong>
+                  )}
+                </li>
+                <li>
+                  Most active project: <strong>{mostActiveProj ? `${mostActiveProj.project} (${mostActiveProj.count})` : "N/A"}</strong>
+                </li>
+                <li>
+                  Top failing application:{" "}
+                  {topFailing[0] ? (
+                    <>
+                      <AppEnvironmentLabel
+                        appName={splitApplicationAndEnv(topFailing[0].application).app}
+                        environment={splitApplicationAndEnv(topFailing[0].application).env}
+                      />
+                      {" "}
+                      <strong>({topFailing[0].failures} failures)</strong>
+                    </>
+                  ) : (
+                    <strong>N/A</strong>
+                  )}
+                </li>
+                <li>
+                  Failure trend vs previous period: <strong>{trend}</strong>
+                </li>
+              </ul>
+            </section>
           </>
         ) : null}
       </main>
