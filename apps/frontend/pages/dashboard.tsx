@@ -194,6 +194,9 @@ export default function DashboardPage() {
             <p className="subtitle">Deployment activity visualization for authenticated users.</p>
           </div>
           <div className="header-actions">
+            <button type="button" className="btn btn-secondary" onClick={() => void router.push("/availability-summary")}>
+              Executive Availability
+            </button>
             <button type="button" className="btn btn-secondary" onClick={() => void router.push("/summary")}>
               Executive Summary
             </button>

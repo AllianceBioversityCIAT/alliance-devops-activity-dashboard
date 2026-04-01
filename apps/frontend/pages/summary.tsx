@@ -207,6 +207,9 @@ export default function SummaryPage() {
             <p className="subtitle">High-level deployment insights for leadership and operations.</p>
           </div>
           <div className="header-actions">
+            <button type="button" className="btn btn-secondary" onClick={() => void router.push("/availability-summary")}>
+              Executive Availability
+            </button>
             <button type="button" className="btn btn-secondary" onClick={() => void router.push("/dashboard")}>
               Dashboard
             </button>
